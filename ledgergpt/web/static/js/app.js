@@ -626,7 +626,6 @@ function executeTallySync() {
             clear_existing: clearDb 
         })
     })
-    })
     .then(async res => {
         const data = await res.json();
         if (!res.ok) {
