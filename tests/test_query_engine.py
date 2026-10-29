@@ -45,6 +45,20 @@ class TestLedgerGPTEngine(unittest.TestCase):
                 "party_name": "Gamma Suppliers", "primary_ledger": "Printing Charges", "cost_centre": "General",
                 "net_amount": 5000.0, "tax_amount": 0.0, "gross_amount": 5000.0,
                 "narration": "Cancellation charge deducted", "day_of_week": "Saturday", "is_weekend": 1, "is_round_sum": 0
+            },
+            {
+                "guid": "g5", "voucher_type": "Payment", "voucher_no": "P501", "reference_no": "PAY01",
+                "date": "2017-07-15", "financial_year": "FY 2017-18", "month_year": "Jul 2017", "quarter": "Q2",
+                "party_name": "Gamma Suppliers", "primary_ledger": "Bank of Baroda", "cost_centre": "General",
+                "net_amount": 65800.0, "tax_amount": 0.0, "gross_amount": 65800.0,
+                "narration": "Final payment against printing bills", "day_of_week": "Saturday", "is_weekend": 1, "is_round_sum": 0
+            },
+            {
+                "guid": "g6", "voucher_type": "Receipt", "voucher_no": "R101", "reference_no": "REC01",
+                "date": "2017-07-20", "financial_year": "FY 2017-18", "month_year": "Jul 2017", "quarter": "Q2",
+                "party_name": "Alpha Corp Ltd", "primary_ledger": "Bank of Baroda", "cost_centre": "General",
+                "net_amount": 118000.0, "tax_amount": 0.0, "gross_amount": 118000.0,
+                "narration": "Received on account via RTGS", "day_of_week": "Thursday", "is_weekend": 0, "is_round_sum": 0
             }
         ]
         cls.db.insert_vouchers_batch(test_records)
@@ -66,6 +80,18 @@ class TestLedgerGPTEngine(unittest.TestCase):
         self.assertEqual(res["row_count"], 1)
         self.assertIn("5,000.00", res["answer"])
 
+    def test_party_ledger_statement_query(self):
+        res = self.engine.process_query("share Gamma Suppliers ledger")
+        self.assertIn("Ledger Account Statement: Gamma Suppliers", res["answer"])
+        self.assertEqual(res["row_count"], 3)
+        self.assertEqual(res["columns"], ["date", "voucher_type", "voucher_no", "reference_no", "particulars", "debit", "credit", "running_balance", "narration"])
+
+    def test_cash_inflow_outflow_query(self):
+        res = self.engine.process_query("Show cash inflow and outflow")
+        self.assertIn("Cash & Bank Liquidity Analysis", res["answer"])
+        self.assertIn("1.18 L", res["answer"])
+        self.assertIn("65,800.00", res["answer"])
+
     def test_forensic_narration_search(self):
         res = self.scanner.scan_suspicious_narrations(keywords=["cancellation"])
         self.assertEqual(res["total_flagged"], 1)
@@ -73,7 +99,7 @@ class TestLedgerGPTEngine(unittest.TestCase):
 
     def test_forensic_weekend_entries(self):
         res = self.scanner.detect_weekend_entries()
-        self.assertEqual(res["total_flagged"], 2)
+        self.assertEqual(res["total_flagged"], 3)
 
 if __name__ == "__main__":
     unittest.main()

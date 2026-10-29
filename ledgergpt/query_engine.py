@@ -295,32 +295,99 @@ class QueryEngine:
                 "columns": ["date", "voucher_no", "reference_no", "party_name", "primary_ledger", "gross_amount", "narration"]
             }
 
-        # 7. Specific Party Lookup (e.g., "bills for Bennett Coleman" or "purchases from Bartaman")
-        party_match = re.search(r"(?:for|from|to|party|client|vendor)\s+([A-Za-z0-9\.\s&-]{3,35})(?:\s+bills|\s+invoices|\s+vouchers|$)", original_q, re.IGNORECASE)
-        if party_match and not any(k in lower_q for k in ["top", "total", "sales", "purchase"]):
-            candidate = party_match.group(1).strip()
-            sql = """
-            SELECT date, voucher_type, voucher_no, reference_no, party_name,
-                   primary_ledger, gross_amount, narration
-            FROM vouchers
-            WHERE LOWER(party_name) LIKE LOWER(?)
-            ORDER BY date DESC
-            LIMIT 50
-            """
-            rows = self.db.execute_query(sql, (f"%{candidate}%",))
-            if rows:
-                exact_name = rows[0]["party_name"]
-                tot = sum(r["gross_amount"] for r in rows)
-                ans = f"Found **{len(rows)} vouchers** for **{exact_name}** totaling **{format_inr(tot)}**."
-                return {
-                    "answer": ans,
-                    "sql": sql.strip(),
-                    "row_count": len(rows),
-                    "data": rows,
-                    "columns": ["date", "voucher_type", "voucher_no", "reference_no", "party_name", "primary_ledger", "gross_amount", "narration"]
-                }
+        # 7. Cash Inflow & Outflow / Cash & Bank Position
+        if (
+            ("inflow" in lower_q or "outflow" in lower_q) or
+            ("cash flow" in lower_q or "cashflow" in lower_q) or
+            ("receipts and payments" in lower_q or "receipt and payment" in lower_q) or
+            ("cash in hand" in lower_q or "bank balance" in lower_q or "cash balance" in lower_q) or
+            (("cash" in lower_q or "bank" in lower_q) and any(k in lower_q for k in ["summary", "position", "statement", "trend", "total", "in/out", "balance"]))
+        ):
+            fy_match = re.search(r"fy\s*(\d{4}[-_]\d{2})", lower_q)
+            fy_clause = ""
+            params = []
+            desc_fy = ""
+            if fy_match:
+                fy_val = f"FY {fy_match.group(1).replace('_', '-')}"
+                fy_clause = " AND LOWER(financial_year) = LOWER(?)"
+                params.append(fy_val)
+                desc_fy = f" for {fy_val}"
 
-        # 8. Forensic / Keyword Search in Narrations
+            sql_summary = f"""
+            SELECT 
+                voucher_type,
+                COUNT(*) as voucher_count,
+                ROUND(SUM(gross_amount), 2) as total_amount
+            FROM vouchers
+            WHERE LOWER(voucher_type) IN ('receipt', 'payment', 'contra') {fy_clause}
+            GROUP BY voucher_type
+            """
+            v_rows = self.db.execute_query(sql_summary, params)
+            flow_dict = {r["voucher_type"].lower(): (r["voucher_count"], r["total_amount"]) for r in v_rows}
+            rcnt, ramt = flow_dict.get("receipt", (0, 0.0))
+            pcnt, pamt = flow_dict.get("payment", (0, 0.0))
+            ccnt, camt = flow_dict.get("contra", (0, 0.0))
+            net_amt = ramt - pamt
+            net_status = "Net Surplus / Inflow" if net_amt >= 0 else "Net Deficit / Outflow"
+
+            # Check Tally live snapshot if available in company_metadata
+            tally_snapshot = self.db.get_metadata("tally_metrics") if hasattr(self.db, "get_metadata") else None
+            tally_str = ""
+            if tally_snapshot:
+                try:
+                    import json
+                    tm = json.loads(tally_snapshot)
+                    t_in = tm.get("cash_inflow")
+                    t_out = tm.get("cash_outflow")
+                    t_net = tm.get("net_cash_flow")
+                    b_bal = tm.get("bank_accounts")
+                    c_bal = tm.get("cash_in_hand")
+                    tally_str = f" | Tally Snapshot: Live Receipts {format_inr(t_in)}, Payments {format_inr(t_out)}, Net {format_inr(t_net)}, Bank: {format_inr(b_bal)}, Cash: {format_inr(c_bal)}"
+                except Exception:
+                    pass
+
+            ans = (
+                f"**Cash & Bank Liquidity Analysis{desc_fy}**:\n"
+                f"- **Total Cash Inflow (Receipts)**: **{format_inr(ramt)}** across **{rcnt:,} vouchers**\n"
+                f"- **Total Cash Outflow (Payments)**: **{format_inr(pamt)}** across **{pcnt:,} vouchers**\n"
+                f"- **Net Cash Flow**: **{format_inr(net_amt)}** ({net_status})\n"
+                f"- **Contra (Inter-Account Transfers)**: **{format_inr(camt)}** across **{ccnt} transfers**{tally_str}."
+            )
+
+            # Monthly cash flow trend
+            sql_monthly = f"""
+            SELECT 
+                month_year,
+                COUNT(CASE WHEN LOWER(voucher_type) = 'receipt' THEN 1 END) as receipts,
+                ROUND(SUM(CASE WHEN LOWER(voucher_type) = 'receipt' THEN gross_amount ELSE 0 END), 2) as cash_inflow,
+                COUNT(CASE WHEN LOWER(voucher_type) = 'payment' THEN 1 END) as payments,
+                ROUND(SUM(CASE WHEN LOWER(voucher_type) = 'payment' THEN gross_amount ELSE 0 END), 2) as cash_outflow,
+                ROUND(SUM(CASE WHEN LOWER(voucher_type) = 'receipt' THEN gross_amount WHEN LOWER(voucher_type) = 'payment' THEN -gross_amount ELSE 0 END), 2) as net_cash_flow
+            FROM vouchers
+            WHERE LOWER(voucher_type) IN ('receipt', 'payment') {fy_clause}
+            GROUP BY month_year
+            ORDER BY MIN(date) ASC
+            """
+            monthly_data = self.db.execute_query(sql_monthly, params)
+
+            return {
+                "answer": ans,
+                "sql": sql_monthly.strip(),
+                "row_count": len(monthly_data),
+                "data": monthly_data,
+                "columns": ["month_year", "receipts", "cash_inflow", "payments", "cash_outflow", "net_cash_flow"]
+            }
+
+        # 8. Party / Account Ledger Statement (e.g., "share ajay kumar ledger", "ajay kumar ledger", "ledger of ajay kumar")
+        ledger_cand = self._extract_ledger_candidate(original_q, lower_q)
+        if ledger_cand:
+            matched_entity = self._find_matching_ledger(ledger_cand)
+            if matched_entity:
+                ledger_res = self._generate_ledger_statement(matched_entity)
+                if ledger_res:
+                    return ledger_res
+
+        # 9. Forensic / Keyword Search in Narrations
         if any(w in lower_q for w in ["narration", "cancelled", "cancel", "settlement", "personal", "difference", "dispute", "red flag"]):
             clean_term = re.sub(r"(?:show|find|search|vouchers|with|containing|narration|for)", "", lower_q).strip()
             if not clean_term:
@@ -350,14 +417,192 @@ class QueryEngine:
 
         return None
 
+    def _extract_ledger_candidate(self, original_q, lower_q):
+        """Extracts potential party/ledger candidate from natural language query."""
+        if any(term in lower_q for term in ["total sales", "total purchase", "top clients", "top vendors", "top creditors", "top debtors", "debit note", "credit note", "inflow", "outflow", "cash flow"]):
+            return None
+
+        t = original_q.strip()
+        # Remove polite/command prefix words
+        t = re.sub(r"^(?:please\s+|kindly\s+)?(?:share|show|give\s+me|give|fetch|view|display|get|print|send|open)\s+", "", t, flags=re.IGNORECASE).strip()
+        t = re.sub(r"^the\s+", "", t, flags=re.IGNORECASE).strip()
+
+        # Check: "ledger of <candidate>", "statement of <candidate>", "account of <candidate>"
+        m = re.search(r"^(?:ledger|statement|account(?:\s+statement)?|vouchers|transactions|bills|invoices)\s+(?:of|for)\s+(.+)$", t, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+
+        # Check: "<candidate> ledger", "<candidate> statement", "<candidate> account"
+        m = re.search(r"^(.+?)\s+(?:ledger|statement|account(?:\s+statement)?|account\s+details)(?:\s+details)?$", t, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+
+        # Check: "bills/vouchers/transactions for/from/to <candidate>"
+        m = re.search(r"^(?:bills|invoices|vouchers|transactions)\s+(?:for|from|to|of)\s+(.+)$", t, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+
+        # Check: "(?:for|from|to|party|vendor|client)\s+<candidate>"
+        m = re.search(r"^(?:for|from|to|party|client|vendor|supplier|customer)\s+(.+?)(?:\s+(?:bills|invoices|vouchers|ledger))?$", t, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+
+        # If user directly entered a short entity name (1 to 5 words)
+        words = t.split()
+        if 1 <= len(words) <= 5 and not any(w.lower() in ["why", "how", "what", "when", "where", "help"] for w in words):
+            return t
+
+        return None
+
+    def _find_matching_ledger(self, candidate):
+        """Finds matching ledger name from party_name or primary_ledger in database."""
+        if not candidate:
+            return None
+        candidate = candidate.strip()
+        candidate = re.sub(r"^(?:m/s\.?|mr\.?|shri|mrs\.?|dr\.?)\s+", "", candidate, flags=re.IGNORECASE).strip()
+        if len(candidate) < 2:
+            return None
+
+        # 1. Exact match in party_name or primary_ledger
+        exact_rows = self.db.execute_query(
+            """SELECT party_name as name FROM vouchers WHERE LOWER(party_name) = LOWER(?)
+               UNION
+               SELECT primary_ledger as name FROM vouchers WHERE LOWER(primary_ledger) = LOWER(?)
+               LIMIT 1""",
+            (candidate, candidate)
+        )
+        if exact_rows:
+            return exact_rows[0]["name"]
+
+        # 2. Substring match
+        sub_rows = self.db.execute_query(
+            """SELECT name FROM (
+                   SELECT DISTINCT party_name as name FROM vouchers WHERE LOWER(party_name) LIKE LOWER(?)
+                   UNION
+                   SELECT DISTINCT primary_ledger as name FROM vouchers WHERE LOWER(primary_ledger) LIKE LOWER(?)
+               ) ORDER BY LENGTH(name) ASC LIMIT 1""",
+            (f"%{candidate}%", f"%{candidate}%")
+        )
+        if sub_rows:
+            return sub_rows[0]["name"]
+
+        # 3. All words match
+        words = candidate.split()
+        if len(words) > 1:
+            p_c = " AND ".join(["LOWER(party_name) LIKE ?"] * len(words))
+            l_c = " AND ".join(["LOWER(primary_ledger) LIKE ?"] * len(words))
+            params = [f"%{w.lower()}%" for w in words]
+            w_rows = self.db.execute_query(
+                f"""SELECT name FROM (
+                       SELECT DISTINCT party_name as name FROM vouchers WHERE {p_c}
+                       UNION
+                       SELECT DISTINCT primary_ledger as name FROM vouchers WHERE {l_c}
+                   ) ORDER BY LENGTH(name) ASC LIMIT 1""",
+                params + params
+            )
+            if w_rows:
+                return w_rows[0]["name"]
+
+        return None
+
+    def _generate_ledger_statement(self, entity_name):
+        """Generates authentic double-entry ledger statement with Debit, Credit & Running Balance."""
+        sql = """
+        SELECT id, date, voucher_type, voucher_no, reference_no, party_name, primary_ledger, gross_amount, narration
+        FROM vouchers
+        WHERE party_name = ? OR primary_ledger = ?
+        ORDER BY date ASC, id ASC
+        """
+        rows = self.db.execute_query(sql, (entity_name, entity_name))
+        if not rows:
+            return None
+
+        tot_dr = 0.0
+        tot_cr = 0.0
+        bal = 0.0
+        records = []
+        for r in rows:
+            vamt = r["gross_amount"] or 0.0
+            vt_lower = (r["voucher_type"] or "").lower()
+            is_party = (r["party_name"] == entity_name)
+            
+            if is_party:
+                particulars = r["primary_ledger"] or "Opposing Ledger"
+                if vt_lower in ["payment", "sales", "debit note"]:
+                    dr, cr = vamt, 0.0
+                elif vt_lower in ["purchase", "receipt", "credit note"]:
+                    dr, cr = 0.0, vamt
+                else:
+                    dr, cr = vamt, 0.0
+            else:
+                particulars = r["party_name"] or "Opposing Ledger"
+                if vt_lower in ["receipt", "purchase"]:
+                    dr, cr = vamt, 0.0
+                elif vt_lower in ["payment", "sales"]:
+                    dr, cr = 0.0, vamt
+                else:
+                    dr, cr = 0.0, vamt
+                    
+            tot_dr += dr
+            tot_cr += cr
+            bal += (dr - cr)
+            
+            if bal > 0.01:
+                bal_str = f"{format_inr(bal)} Dr"
+            elif bal < -0.01:
+                bal_str = f"{format_inr(abs(bal))} Cr"
+            else:
+                bal_str = "₹ 0.00 (Nil)"
+                
+            records.append({
+                "date": r["date"],
+                "voucher_type": r["voucher_type"],
+                "voucher_no": r["voucher_no"],
+                "reference_no": r["reference_no"] or "-",
+                "particulars": particulars,
+                "debit": format_inr(dr) if dr > 0 else "-",
+                "credit": format_inr(cr) if cr > 0 else "-",
+                "running_balance": bal_str,
+                "narration": r["narration"]
+            })
+
+        closing = f"{format_inr(bal)} Dr" if bal > 0.01 else (f"{format_inr(abs(bal))} Cr" if bal < -0.01 else "₹ 0.00 (Settled)")
+        ans = (
+            f"**Ledger Account Statement: {entity_name}**\n"
+            f"Total Transactions: **{len(rows):,} vouchers** | "
+            f"Total Debits: **{format_inr(tot_dr)}** | "
+            f"Total Credits: **{format_inr(tot_cr)}** | "
+            f"Closing Balance: **{closing}**."
+        )
+
+        return {
+            "answer": ans,
+            "sql": sql.strip(),
+            "row_count": len(rows),
+            "data": records,
+            "columns": ["date", "voucher_type", "voucher_no", "reference_no", "particulars", "debit", "credit", "running_balance", "narration"]
+        }
+
     def _fallback_fts_search(self, q):
-        """Fallback full-text search across vouchers."""
+        """Fallback full-text search across vouchers with stopword filtering and AND relevance."""
         clean_q = re.sub(r"[^\w\s]", "", q).strip()
         words = clean_q.split()
         if not words:
             return {"answer": "Please provide a valid financial question or entity name.", "data": [], "columns": [], "sql": ""}
 
-        match_clause = " OR ".join(words[:4])
+        STOP_WORDS = {
+            "share", "show", "give", "fetch", "view", "display", "get", "print", "send", "open",
+            "the", "a", "an", "for", "from", "to", "of", "in", "on", "at", "by", "with",
+            "and", "or", "is", "are", "was", "were", "it", "this", "that", "all",
+            "me", "us", "please", "kindly", "tell", "details", "voucher", "vouchers",
+            "bills", "invoices", "ledger", "account", "statement"
+        }
+        keywords = [w for w in words if w.lower() not in STOP_WORDS]
+        if not keywords:
+            keywords = words[:3]
+
+        # Try AND search first for exact relevance
+        match_clause = " AND ".join(keywords[:4])
         sql = """
         SELECT v.date, v.voucher_type, v.voucher_no, v.reference_no,
                v.party_name, v.primary_ledger, v.cost_centre,
@@ -370,7 +615,16 @@ class QueryEngine:
         """
         try:
             rows = self.db.execute_query(sql, (match_clause,))
-            ans = f"Search across records for '{q}': Found **{len(rows)} vouchers**."
+            # If AND search yielded nothing and there were multiple words, try OR as softer fallback
+            if not rows and len(keywords) > 1:
+                match_clause_or = " OR ".join(keywords[:4])
+                rows = self.db.execute_query(sql, (match_clause_or,))
+                
+            if rows:
+                ans = f"Search across records for **'{q}'**: Found **{len(rows)} matching vouchers**."
+            else:
+                ans = f"No matching vouchers found for **'{q}'**. Try querying by party name (e.g. *'Ajay Kumar ledger'*), *'Cash inflow and outflow'*, *'Total sales'*, or *'Top 10 vendors'*."
+
             return {
                 "answer": ans,
                 "sql": sql.strip(),
@@ -380,7 +634,7 @@ class QueryEngine:
             }
         except Exception as e:
             return {
-                "answer": f"Unable to parse query directly: {e}. Try asking: 'Total sales', 'Top 10 clients', 'Debit notes', or 'Purchases'.",
+                "answer": f"Unable to parse query directly: {e}. Try asking: 'Ajay Kumar ledger', 'Cash inflow and outflow', 'Total sales', or 'Top 10 vendors'.",
                 "sql": "",
                 "row_count": 0,
                 "data": [],
