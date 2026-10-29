@@ -7,6 +7,7 @@ setup(
     author="Amit Rathi (Datawizibility)",
     author_email="datawizibility@gmail.com",
     packages=find_packages(),
+    py_modules=["cli"],
     include_package_data=True,
     install_requires=[
         "flask>=2.3.0",
@@ -16,7 +17,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "ledgergpt=cli:main",
+            "ledgergpt=ledgergpt.cli:main",
         ],
     },
     classifiers=[

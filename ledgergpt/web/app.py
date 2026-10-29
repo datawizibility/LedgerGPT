@@ -119,10 +119,14 @@ def export_csv():
     data = request.get_json() or {}
     rows = data.get("data", [])
     columns = data.get("columns", [])
-    filename = data.get("filename", "LedgerGPT_Query_Export.csv")
+    raw_filename = data.get("filename", "LedgerGPT_Query_Export.csv")
+    safe_filename = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', os.path.basename(str(raw_filename))) or "LedgerGPT_Export.csv"
 
     if not rows:
         return jsonify({"error": "No data to export"}), 400
+
+    # Cap export rows at 50,000 for server memory defense
+    rows = rows[:50000]
 
     if not columns and rows:
         columns = list(rows[0].keys())
@@ -142,7 +146,7 @@ def export_csv():
         mem,
         mimetype="text/csv",
         as_attachment=True,
-        download_name=filename
+        download_name=safe_filename
     )
 
 @app.route("/api/forensic", methods=["GET"])
@@ -160,6 +164,7 @@ def get_tally_companies():
     return jsonify({"connected": True, "companies": comps})
 
 @app.route("/api/sync-tally", methods=["POST"])
+@app.route("/api/tally-sync", methods=["POST"])
 def sync_tally():
     data = request.get_json() or {}
     company_name = data.get("company_name")

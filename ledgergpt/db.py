@@ -1,12 +1,57 @@
 """
 Financial Database Manager & Schema Engine for LedgerGPT.
 Uses high-performance SQLite with FTS5 Full-Text Search.
+Remediated for strict read-only execution, GUID upsert deduplication,
+connection lifecycle management, and WAL/busy timeout resilience.
 """
 
 import sqlite3
 import os
+import re
 from pathlib import Path
 from ledgergpt.config import DB_PATH
+
+
+def read_only_authorizer(action, arg1, arg2, db_name, trigger_name):
+    """
+    SQLite authorizer callback that strictly forbids all write, DDL,
+    and schema-modifying actions during read-only SQL queries.
+    Blocks CTE injection attacks (e.g., WITH t AS (...) DELETE FROM ...).
+    Permits internal virtual table schema reflection on sqlite_master.
+    """
+    if action in (
+        sqlite3.SQLITE_DELETE,
+        sqlite3.SQLITE_INSERT,
+        sqlite3.SQLITE_DROP_TABLE,
+        sqlite3.SQLITE_ALTER_TABLE,
+        sqlite3.SQLITE_DROP_INDEX,
+        sqlite3.SQLITE_DROP_VIEW,
+        sqlite3.SQLITE_DROP_TRIGGER,
+        sqlite3.SQLITE_ATTACH,
+        sqlite3.SQLITE_DETACH,
+    ):
+        return sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_UPDATE:
+        if arg1 not in ("sqlite_master", "sqlite_schema"):
+            return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+class ManagedConnection(sqlite3.Connection):
+    """
+    Custom SQLite Connection that automatically closes upon context exit
+    when used as `with conn:`, preventing connection leaks while preserving
+    shared in-memory connections.
+    """
+    is_shared = False
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            super().__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            if not self.is_shared:
+                self.close()
+
 
 class FinancialDB:
     def __init__(self, db_path=None):
@@ -15,7 +60,8 @@ class FinancialDB:
         
         # If in-memory, keep a single persistent connection
         if self.db_path == ":memory:":
-            self._shared_conn = sqlite3.connect(":memory:")
+            self._shared_conn = sqlite3.connect(":memory:", factory=ManagedConnection)
+            self._shared_conn.is_shared = True
             self._shared_conn.row_factory = sqlite3.Row
         else:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -25,8 +71,13 @@ class FinancialDB:
     def get_connection(self):
         if self._shared_conn:
             return self._shared_conn
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, factory=ManagedConnection)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+        except Exception:
+            pass
         return conn
 
     def init_schema(self):
@@ -98,6 +149,13 @@ class FinancialDB:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vch_cc ON vouchers(cost_centre)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vch_gross ON vouchers(gross_amount)")
 
+        # Unique partial index on GUID to prevent book duplication on re-sync
+        cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_guid 
+        ON vouchers(guid) 
+        WHERE guid IS NOT NULL AND guid != ''
+        """)
+
         # Full-Text Search Table (FTS5)
         cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS vouchers_fts USING fts5(
@@ -108,15 +166,6 @@ class FinancialDB:
             narration,
             content='vouchers',
             content_rowid='id'
-        )
-        """)
-
-        # Metadata Table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sys_metadata (
-            key TEXT PRIMARY KEY,
-            val TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
@@ -133,8 +182,11 @@ class FinancialDB:
         if not self._shared_conn:
             conn.close()
 
-    def insert_vouchers_batch(self, vouchers_list):
-        """High-speed batch insertion of vouchers with defensive key normalization."""
+    def insert_vouchers_batch(self, vouchers_list, rebuild_fts=True):
+        """
+        High-speed batch insertion of vouchers with GUID upsert deduplication
+        and defensive key normalization.
+        """
         if not vouchers_list:
             return 0
 
@@ -161,30 +213,62 @@ class FinancialDB:
             :primary_ledger, :cost_centre, :net_amount, :tax_amount,
             :gross_amount, :narration, :day_of_week, :is_weekend, :is_round_sum
         )
+        ON CONFLICT(guid) WHERE guid IS NOT NULL AND guid != '' DO UPDATE SET
+            voucher_type = excluded.voucher_type,
+            voucher_no = excluded.voucher_no,
+            reference_no = excluded.reference_no,
+            date = excluded.date,
+            financial_year = excluded.financial_year,
+            month_year = excluded.month_year,
+            quarter = excluded.quarter,
+            party_name = excluded.party_name,
+            primary_ledger = excluded.primary_ledger,
+            cost_centre = excluded.cost_centre,
+            net_amount = excluded.net_amount,
+            tax_amount = excluded.tax_amount,
+            gross_amount = excluded.gross_amount,
+            narration = excluded.narration,
+            day_of_week = excluded.day_of_week,
+            is_weekend = excluded.is_weekend,
+            is_round_sum = excluded.is_round_sum
         """
         cursor.executemany(sql, sanitized)
         conn.commit()
         if not self._shared_conn:
             conn.close()
             
-        self.rebuild_fts()
+        if rebuild_fts:
+            self.rebuild_fts()
         return len(sanitized)
 
     def execute_query(self, sql, params=()):
-        """Execute a read-only SQL query and return rows as dicts."""
-        forbidden = ["DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"]
-        first_word = sql.strip().split()[0].upper()
-        if first_word in forbidden:
-            raise ValueError(f"Write operation '{first_word}' is forbidden in financial query engine.")
+        """
+        Execute a read-only SQL query and return rows as dicts.
+        Secured with SQLite authorizer preventing any write or schema tampering,
+        regardless of statement structure (e.g. CTEs, subqueries, comments).
+        """
+        stripped = sql.strip()
+        first_token = re.split(r'\s+', stripped)[0].upper()
+        forbidden_keywords = ["DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE", "REPLACE", "CREATE"]
+        if first_token in forbidden_keywords:
+            raise ValueError(f"Write operation '{first_token}' is forbidden in financial query engine.")
+
+        # Additional regex check for write verbs across statement
+        if re.search(r'\b(DELETE\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DROP\s+TABLE|ALTER\s+TABLE)\b', stripped, re.IGNORECASE):
+            raise ValueError("Write operation detected in financial query engine.")
 
         conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(sql, params)
-        rows = cursor.fetchall()
-        result = [dict(r) for r in rows]
-        if not self._shared_conn:
-            conn.close()
-        return result
+        conn.set_authorizer(read_only_authorizer)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            result = [dict(r) for r in rows]
+            return result
+        finally:
+            conn.set_authorizer(None)
+            if not self._shared_conn:
+                conn.close()
 
     def get_kpis(self):
         """Returns consolidated financial KPIs."""

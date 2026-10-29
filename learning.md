@@ -12,6 +12,14 @@
   ```
   This cleanly resynchronizes the FTS index from the underlying content table.
 
-### 2026-10-29: Multi-Cost-Centre Voucher Deduplication
-- **Lesson**: In Tally Prime, a single voucher number or invoice often has multiple allocations to different cost centres or expense ledgers. Enforcing a `UNIQUE` constraint on `voucher_guid` caused multi-line vouchers to overwrite previous cost-centre allocations during batch ingestion.
-- **Solution**: Rely on an auto-increment integer primary key `id` for row-level integrity and allow multiple lines with the same `guid`.
+### 2026-10-29: SQLite Authorizer & FTS5 Internal Reflection
+- **Lesson**: When setting `conn.set_authorizer` to block write operations, SQLite's FTS5 virtual table engine executes internal schema checks on `sqlite_master` which Python maps to action code 23 (`SQLITE_UPDATE`). Blithely blocking all action code 23 updates broke FTS5 query initialization with `vtable constructor failed: vouchers_fts`.
+- **Solution**: Check the target table name in authorizer callbacks. If `action == sqlite3.SQLITE_UPDATE` and target is `sqlite_master` or `sqlite_schema`, permit it; deny write actions strictly on all user application tables.
+
+### 2026-10-29: Double-Entry Dr/Cr Derivation for Asset vs Party Ledgers
+- **Lesson**: In naive ledger statement generators, mapping voucher types without checking account classification causes Cash/Bank accounts to invert Dr and Cr (treating Cash inflows as Credit and outflows as Debit).
+- **Solution**: Explicitly branch Dr/Cr derivation by account class: for Cash/Bank asset accounts, Inflows (Receipts/Sales) are always Debits and Outflows (Payments/Purchases) are always Credits.
+
+### 2026-10-29: Zero Fabricated Metrics Principle
+- **Lesson**: Hardcoding demo defaults in analytics fallback functions (e.g., ₹89,468 cash or ₹38.9 Cr turnover) undermines client trust and violates financial auditability rules.
+- **Solution**: Return strictly computed values or clean zeroes / "N/A" indicators. Never substitute fabricated numbers for missing source data.

@@ -451,7 +451,7 @@ function loadVouchersGrid(page = 1) {
             updateGridPagination(data.page, data.total_pages, data.total_rows);
         })
         .catch(err => {
-            tbody.innerHTML = `<tr><td colspan="8" style="color:red; text-align:center;">Failed to load vouchers: ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="color:red; text-align:center;">Failed to load vouchers: ${escapeHtml(err.message)}</td></tr>`;
         });
 }
 
@@ -827,7 +827,7 @@ function loadForensicScan() {
         renderForensicResults(data);
     })
     .catch(err => {
-        body.innerHTML = `<div style="color:red; padding:20px;">Failed to run scan: ${err.message}</div>`;
+        body.innerHTML = `<div style="color:red; padding:20px;">Failed to run scan: ${escapeHtml(err.message)}</div>`;
     });
 }
 
@@ -1071,8 +1071,13 @@ function renderForensicResults(data) {
 
 // ==================== UTILITY HELPERS ====================
 function escapeHtml(text) {
-    if (!text) return '';
-    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function escapeForJs(text) {

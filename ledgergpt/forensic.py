@@ -21,8 +21,8 @@ class ForensicScanner:
                 "director", "advance", "tcs", "reversal"
             ]
         
-        # Use FTS5 for instant sub-millisecond retrieval
-        fts_query = " OR ".join(keywords)
+        # Use FTS5 for instant sub-millisecond retrieval (quoted for safe multi-word phrase matching)
+        fts_query = " OR ".join(f'"{k}"' for k in keywords)
         sql = """
         SELECT v.id, v.date, v.voucher_type, v.voucher_no, v.reference_no,
                v.party_name, v.gross_amount, v.narration
@@ -117,7 +117,7 @@ class ForensicScanner:
         for r in rows:
             amt = r["gross_amount"]
             if amt and amt >= 10:
-                s = str(amt).replace(".", "").lstrip("0")
+                s = f"{float(amt):.2f}".replace(".", "").lstrip("0")
                 if s:
                     first_digits.append(int(s[0]))
 
@@ -169,7 +169,12 @@ class ForensicScanner:
         FROM vouchers
         WHERE gross_amount >= ?
           AND (
-              LOWER(party_name) LIKE '%cash%' OR LOWER(primary_ledger) LIKE '%cash%'
+              ' ' || LOWER(party_name) || ' ' LIKE '% cash %' 
+              OR ' ' || LOWER(primary_ledger) || ' ' LIKE '% cash %'
+              OR LOWER(party_name) LIKE '%cash in hand%'
+              OR LOWER(primary_ledger) LIKE '%cash in hand%'
+              OR LOWER(party_name) LIKE '%petty cash%'
+              OR LOWER(primary_ledger) LIKE '%petty cash%'
           )
           AND (
               LOWER(party_name) LIKE '%loan%' OR LOWER(primary_ledger) LIKE '%loan%'

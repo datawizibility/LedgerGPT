@@ -25,7 +25,7 @@ class DashboardService:
                 ORDER BY financial_year DESC
             """)
             periods = [r[0] for r in cursor.fetchall()]
-            return periods if periods else ["FY 2026-27", "FY 2018-19", "FY 2017-18"]
+            return periods if periods else []
 
     def get_available_cost_centres(self):
         """Returns distinct cost centres/projects present in vouchers."""
@@ -115,8 +115,9 @@ class DashboardService:
             # Fetch active company & snapshot metrics from metadata
             active_company = self.db.get_metadata("active_company")
             if not active_company:
-                # Infer from first party or fallback
-                active_company = "BHARAT VANIJYA EASTERN PRIVATE LIMITED (LATEHAR)"
+                cursor.execute("SELECT party_name FROM vouchers WHERE party_name IS NOT NULL AND party_name != '' LIMIT 1")
+                first_row = cursor.fetchone()
+                active_company = first_row[0] if first_row else "LedgerGPT Company"
 
             raw_metrics = self.db.get_metadata("tally_metrics", "{}")
             try:
@@ -124,19 +125,23 @@ class DashboardService:
             except Exception:
                 t_metrics = {}
 
-            # Tally Balance Sheet & Cash Balances
-            bank_bal = t_metrics.get("bank_balance", 64927.02)
-            cash_bal = t_metrics.get("cash_in_hand", 89468.0)
+            # Tally Balance Sheet & Cash Balances (strictly authentic, zero hardcoded fabrication)
+            bank_bal = float(t_metrics.get("bank_balance", 0.0) or 0.0)
+            cash_bal = float(t_metrics.get("cash_in_hand", 0.0) or 0.0)
             total_liquid = bank_bal + cash_bal
-            current_assets = t_metrics.get("current_assets", 210559400.82)
-            current_liabilities = t_metrics.get("current_liabilities", 211321138.95)
+            current_assets = float(t_metrics.get("current_assets", 0.0) or 0.0)
+            current_liabilities = float(t_metrics.get("current_liabilities", 0.0) or 0.0)
             working_capital = current_assets - current_liabilities
-            current_ratio = round(current_assets / current_liabilities, 2) if current_liabilities > 0 else 1.0
+            current_ratio = round(current_assets / current_liabilities, 2) if current_liabilities > 0 else 0.0
 
-            # If Tally cash inflow is larger (whole year), keep accurate
-            display_inflow = max(cash_inflow, 389544772.0 if "BHARAT" in active_company.upper() else cash_inflow)
-            display_outflow = max(cash_outflow, 391151260.11 if "BHARAT" in active_company.upper() else cash_outflow)
-            display_net_flow = display_inflow - display_outflow
+            # Computed Cash Inflow and Outflow directly from vouchers
+            display_inflow = round(cash_inflow, 2)
+            display_outflow = round(cash_outflow, 2)
+            display_net_flow = round(display_inflow - display_outflow, 2)
+
+            sundry_debtors = float(t_metrics.get("sundry_debtors", 0.0) or 0.0)
+            sundry_creditors = float(t_metrics.get("sundry_creditors", 0.0) or 0.0)
+            turnover_days = round((sundry_debtors / s_gross) * 365, 2) if s_gross > 0 and sundry_debtors > 0 else 0.0
 
             return {
                 "active_company": active_company,
@@ -171,7 +176,7 @@ class DashboardService:
                 "cash_in_hand_formatted": format_inr(cash_bal),
                 "bank_balance": bank_bal,
                 "bank_balance_formatted": format_inr(bank_bal),
-                "bank_name": t_metrics.get("bank_name", "AXIS BANK (INDIA)"),
+                "bank_name": t_metrics.get("bank_name", "Primary Bank"),
                 "total_liquid_funds_formatted": format_inr(total_liquid),
                 "cash_inflow": display_inflow,
                 "cash_inflow_formatted": format_inr(display_inflow),
@@ -186,9 +191,9 @@ class DashboardService:
                 "current_liabilities_formatted": format_inr(current_liabilities),
                 "working_capital_formatted": format_inr(working_capital),
                 "current_ratio": current_ratio,
-                "receivable_turnover_days": 2.64,
-                "receivables_formatted": format_inr(t_metrics.get("sundry_debtors", 13237641.0)),
-                "payables_formatted": format_inr(7755247.0 if "BHARAT" in active_company.upper() else t_metrics.get("sundry_creditors", 25865748.68)),
+                "receivable_turnover_days": turnover_days,
+                "receivables_formatted": format_inr(sundry_debtors),
+                "payables_formatted": format_inr(sundry_creditors),
             }
 
     def get_monthly_trend(self, fy=None, cost_centre=None):
@@ -442,6 +447,14 @@ class DashboardService:
                 if cost_centre and cost_centre != "All":
                     where_clauses.append("cost_centre = ?")
                     params.append(cost_centre)
+                if fy and fy != "All":
+                    import re
+                    m = re.search(r"(\d{4})[-_](\d{2,4})", fy)
+                    if m:
+                        start_yr = int(m.group(1))
+                        end_yr = start_yr + 1 if len(m.group(2)) == 2 else int(m.group(2))
+                        where_clauses.append("bill_date >= ? AND bill_date <= ?")
+                        params.extend([f"{start_yr:04d}-04-01", f"{end_yr:04d}-03-31"])
 
                 where_str = " AND ".join(where_clauses)
                 cursor.execute(f"""
@@ -581,7 +594,7 @@ class DashboardService:
         aging = self.get_aging_summary(nature="all", cost_centre=cost_centre, fy=fy)
         rankings = self.get_rankings(top_n=10, fy=fy, cost_centre=cost_centre)
         monthly = self.get_monthly_trend(fy=fy, cost_centre=cost_centre)
-        active_co = self.db.get_metadata("active_company", "BHARAT VANIJYA EASTERN PRIVATE LIMITED")
+        active_co = self.db.get_metadata("active_company") or "LedgerGPT Operating Entity"
 
         return {
             "report_title": f"CFO Executive MIS Report - {active_co}",

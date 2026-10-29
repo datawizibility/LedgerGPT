@@ -10,6 +10,30 @@ from ledgergpt.formatters import format_inr
 from ledgergpt.llm_adapter import LLMAdapter
 from ledgergpt.dashboard_service import DashboardService
 
+def extract_fy(text):
+    m = re.search(r"(?:fy\s*)?(\d{4})[-_](\d{2,4})", text, re.IGNORECASE)
+    if m:
+        yr1 = m.group(1)
+        yr2 = m.group(2)
+        if len(yr2) == 4:
+            yr2 = yr2[2:]
+        return f"FY {yr1}-{yr2}"
+    return None
+
+def extract_top_n(text, default=10):
+    m = re.search(r"top\s*(\d+)", text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    word_map = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "fifteen": 15, "twenty": 20, "fifty": 50
+    }
+    for word, val in word_map.items():
+        if re.search(rf"\btop\s+{word}\b", text, re.IGNORECASE):
+            return val
+    return default
+
 class QueryEngine:
     def __init__(self, db=None, llm_adapter=None):
         self.db = db or FinancialDB()
@@ -39,15 +63,19 @@ class QueryEngine:
         schema = self.db.get_schema_summary()
         sql = self.llm.generate_sql(q, schema)
         if sql:
+            # Enforce safe bounds and LIMIT on LLM SQL
+            clean_sql = sql.strip().rstrip(";")
+            if not re.search(r'\bLIMIT\s+\d+\b', clean_sql, re.IGNORECASE):
+                clean_sql = f"{clean_sql} LIMIT 100"
             try:
-                rows = self.db.execute_query(sql)
+                rows = self.db.execute_query(clean_sql)
                 elapsed_ms = round((time.time() - start_time) * 1000, 2)
                 
                 # Synthesize answer
                 summary = self._synthesize_llm_result(q, rows)
                 return {
                     "answer": summary,
-                    "sql": sql,
+                    "sql": clean_sql,
                     "row_count": len(rows),
                     "data": rows[:100],
                     "columns": list(rows[0].keys()) if rows else [],
@@ -55,7 +83,7 @@ class QueryEngine:
                     "source": f"LLM SQL Adapter ({self.llm.provider.upper()})"
                 }
             except Exception as e:
-                print(f"[SQL EXEC ERROR] {e} on SQL: {sql}")
+                print(f"[SQL EXEC ERROR] {e} on SQL: {clean_sql}")
 
         # 3. Fallback: Full-Text Search across all fields and narrations
         fts_res = self._fallback_fts_search(q)
@@ -122,7 +150,7 @@ class QueryEngine:
             ans = f"**Negative Cash Balance Audit Scan**:\nTotal Flagged Dates: **{flagged} days** where cumulative physical cash-in-hand dropped below ₹0.00."
             return {
                 "answer": ans,
-                "sql": "SELECT date, SUM(inflow - outflow) FROM vouchers WHERE ledger LIKE '%cash%' GROUP BY date",
+                "sql": "SELECT date, SUM(CASE WHEN LOWER(voucher_type) = 'receipt' THEN gross_amount ELSE 0 END) as daily_inflow, SUM(CASE WHEN LOWER(voucher_type) = 'payment' THEN gross_amount ELSE 0 END) as daily_outflow FROM vouchers WHERE LOWER(party_name) LIKE '%cash%' OR LOWER(primary_ledger) LIKE '%cash%' GROUP BY date ORDER BY date ASC",
                 "row_count": flagged,
                 "data": report["records"],
                 "columns": ["date", "daily_inflow", "daily_outflow", "closing_cash_balance", "negative_deficit", "status"]
@@ -130,15 +158,14 @@ class QueryEngine:
 
         # 1. Total Sales / Revenue Query
         if ("total sales" in lower_q or "gross sales" in lower_q or "how much sales" in lower_q or lower_q == "sales"):
-            fy_match = re.search(r"fy\s*(\d{4}[-_]\d{2})", lower_q)
+            fy_val = extract_fy(lower_q)
             qtr_match = re.search(r"(q[1-4])", lower_q)
             
             where = "WHERE LOWER(voucher_type) = 'sales'"
             params = []
             desc = "Total Sales"
             
-            if fy_match:
-                fy_val = f"FY {fy_match.group(1).replace('_', '-')}"
+            if fy_val:
                 where += " AND LOWER(financial_year) = LOWER(?)"
                 params.append(fy_val)
                 desc += f" for {fy_val}"
@@ -186,12 +213,11 @@ class QueryEngine:
 
         # 2. Total Purchases / Expense Query
         if ("total purchase" in lower_q or "gross purchase" in lower_q or "how much purchase" in lower_q or lower_q == "purchases"):
-            fy_match = re.search(r"fy\s*(\d{4}[-_]\d{2})", lower_q)
+            fy_val = extract_fy(lower_q)
             where = "WHERE LOWER(voucher_type) = 'purchase'"
             params = []
             desc = "Total Purchases"
-            if fy_match:
-                fy_val = f"FY {fy_match.group(1).replace('_', '-')}"
+            if fy_val:
                 where += " AND LOWER(financial_year) = LOWER(?)"
                 params.append(fy_val)
                 desc += f" for {fy_val}"
@@ -233,8 +259,7 @@ class QueryEngine:
 
         # 3. Top N Clients / Debtors
         if ("top" in lower_q and ("client" in lower_q or "debtor" in lower_q or "customer" in lower_q)):
-            n_match = re.search(r"top\s*(\d+)", lower_q)
-            n = int(n_match.group(1)) if n_match else 10
+            n = extract_top_n(lower_q, default=10)
             
             sql = """
             SELECT party_name, COUNT(*) as vouchers,
@@ -277,8 +302,7 @@ class QueryEngine:
 
         # 4. Top N Vendors / Creditors / Suppliers
         if ("top" in lower_q and ("vendor" in lower_q or "creditor" in lower_q or "supplier" in lower_q)):
-            n_match = re.search(r"top\s*(\d+)", lower_q)
-            n = int(n_match.group(1)) if n_match else 10
+            n = extract_top_n(lower_q, default=10)
             
             sql = """
             SELECT party_name, COUNT(*) as bills,
@@ -396,12 +420,11 @@ class QueryEngine:
             ("cash in hand" in lower_q or "bank balance" in lower_q or "cash balance" in lower_q) or
             (("cash" in lower_q or "bank" in lower_q) and any(k in lower_q for k in ["summary", "position", "statement", "trend", "total", "in/out", "balance"]))
         ):
-            fy_match = re.search(r"fy\s*(\d{4}[-_]\d{2})", lower_q)
+            fy_val = extract_fy(lower_q)
             fy_clause = ""
             params = []
             desc_fy = ""
-            if fy_match:
-                fy_val = f"FY {fy_match.group(1).replace('_', '-')}"
+            if fy_val:
                 fy_clause = " AND LOWER(financial_year) = LOWER(?)"
                 params.append(fy_val)
                 desc_fy = f" for {fy_val}"
@@ -599,9 +622,12 @@ class QueryEngine:
         return None
 
     def _generate_ledger_statement(self, entity_name):
-        """Generates authentic double-entry ledger statement with Debit, Credit & Running Balance."""
+        """
+        Generates authentic double-entry ledger statement with Debit, Credit & Running Balance.
+        Correctly derives Dr/Cr direction according to account nature (Cash/Bank, Debtor, Creditor, Nominal).
+        """
         sql = """
-        SELECT id, date, voucher_type, voucher_no, reference_no, party_name, primary_ledger, gross_amount, narration
+        SELECT id, date, voucher_type, voucher_no, reference_no, party_name, primary_ledger, gross_amount, net_amount, narration
         FROM vouchers
         WHERE party_name = ? OR primary_ledger = ?
         ORDER BY date ASC, id ASC
@@ -610,43 +636,79 @@ class QueryEngine:
         if not rows:
             return None
 
+        ent_lower = entity_name.lower()
+        is_cash_bank = any(k in ent_lower for k in ["cash", "bank", "axis", "hdfc", "icici", "sbi", "kotak", "pnb", "bob"])
+        
+        # Check predominant nature among rows
+        sales_cnt = sum(1 for r in rows if (r["voucher_type"] or "").lower() == "sales")
+        purchase_cnt = sum(1 for r in rows if (r["voucher_type"] or "").lower() == "purchase")
+        is_creditor = purchase_cnt > sales_cnt
+
         tot_dr = 0.0
         tot_cr = 0.0
         bal = 0.0
         records = []
         for r in rows:
-            vamt = r["gross_amount"] or 0.0
+            gross = r["gross_amount"] or 0.0
+            net = r["net_amount"] if (r["net_amount"] is not None and r["net_amount"] > 0) else gross
             vt_lower = (r["voucher_type"] or "").lower()
             is_party = (r["party_name"] == entity_name)
-            
-            if is_party:
+
+            if is_cash_bank:
+                particulars = r["primary_ledger"] if is_party else (r["party_name"] or "Opposing Ledger")
+                if vt_lower in ["receipt", "sales"]:
+                    dr, cr = gross, 0.0
+                elif vt_lower in ["payment", "purchase"]:
+                    dr, cr = 0.0, gross
+                elif is_party:
+                    dr, cr = gross, 0.0
+                else:
+                    dr, cr = 0.0, gross
+            elif is_party:
                 particulars = r["primary_ledger"] or "Opposing Ledger"
-                if vt_lower in ["payment", "sales", "debit note"]:
-                    dr, cr = vamt, 0.0
-                elif vt_lower in ["purchase", "receipt", "credit note"]:
-                    dr, cr = 0.0, vamt
+                if is_creditor:
+                    # Supplier / Vendor (Liability): Purchase is Cr, Payment is Dr
+                    if vt_lower in ["purchase", "credit note"]:
+                        dr, cr = 0.0, gross
+                    elif vt_lower in ["payment", "debit note"]:
+                        dr, cr = gross, 0.0
+                    else:
+                        dr, cr = 0.0, gross
                 else:
-                    dr, cr = vamt, 0.0
+                    # Customer / Debtor (Asset): Sales is Dr, Receipt is Cr
+                    if vt_lower in ["sales", "debit note"]:
+                        dr, cr = gross, 0.0
+                    elif vt_lower in ["receipt", "credit note"]:
+                        dr, cr = 0.0, gross
+                    else:
+                        dr, cr = gross, 0.0
             else:
+                # Nominal ledger (Expense or Revenue): use net_amount to avoid mixing gross with tax
                 particulars = r["party_name"] or "Opposing Ledger"
-                if vt_lower in ["receipt", "purchase"]:
-                    dr, cr = vamt, 0.0
-                elif vt_lower in ["payment", "sales"]:
-                    dr, cr = 0.0, vamt
+                if any(k in ent_lower for k in ["sales", "revenue", "income", "turnover"]):
+                    amt = net
+                    if vt_lower in ["sales", "receipt"]:
+                        dr, cr = 0.0, amt
+                    else:
+                        dr, cr = amt, 0.0
                 else:
-                    dr, cr = 0.0, vamt
-                    
+                    amt = net
+                    if vt_lower in ["purchase", "payment"]:
+                        dr, cr = amt, 0.0
+                    else:
+                        dr, cr = 0.0, amt
+
             tot_dr += dr
             tot_cr += cr
             bal += (dr - cr)
-            
+
             if bal > 0.01:
                 bal_str = f"{format_inr(bal)} Dr"
             elif bal < -0.01:
                 bal_str = f"{format_inr(abs(bal))} Cr"
             else:
                 bal_str = "₹ 0.00 (Nil)"
-                
+
             records.append({
                 "date": r["date"],
                 "voucher_type": r["voucher_type"],

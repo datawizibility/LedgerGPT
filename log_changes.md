@@ -1,5 +1,41 @@
 # LedgerGPT Change Log
 
+## [1.5.0] - 2026-10-29
+### Remediated & Hardened - Comprehensive 22-Point QC Resolution
+- **Critical #1 - GUID Re-Sync Deduplication (`ledgergpt/db.py`)**:
+  - Implemented `idx_vouchers_guid` partial unique index on non-null/non-empty GUIDs.
+  - Replaced plain INSERT with `INSERT INTO vouchers ... ON CONFLICT(guid) DO UPDATE SET ...` preventing book doubling on re-sync.
+- **Critical #2 - Read-Only SQL Validator Hardening (`ledgergpt/db.py`)**:
+  - Implemented SQLite `set_authorizer` strictly denying all write actions (INSERT, UPDATE, DELETE, DROP, ALTER, ATTACH) regardless of CTE wrapping (`WITH t AS (...) DELETE FROM ...`).
+  - Added regex defense in depth and safe authorizer reset in `finally`.
+- **Critical #3 - Zero Fabricated Dashboard KPIs (`ledgergpt/dashboard_service.py`, `ledgergpt/tally_sync.py`)**:
+  - Removed all hardcoded synthetic figures (`₹89,468`, `₹64,927.02`, `₹21.05 Cr`, `₹21.13 Cr`, `₹38.9 Cr`, `2.64` turnover days, `AXIS BANK (INDIA)`).
+  - Derived liquidity, turnover days, and cash flows purely from actual database records and authentic parsed Tally XML data.
+  - Returns `[]` for periods if no vouchers are loaded.
+- **Critical #4 & High #5 - Double-Entry Ledger Statement & Tally Sign Preservation (`ledgergpt/query_engine.py`, `ledgergpt/tally_sync.py`)**:
+  - Implemented authentic accounting Dr/Cr logic for Cash/Bank asset accounts: Inflows/Receipts $\to$ Debit, Outflows/Payments $\to$ Credit.
+  - Customer/Debtor: Sales $\to$ Dr, Receipts $\to$ Cr. Vendor/Creditor: Purchases $\to$ Cr, Payments $\to$ Dr.
+  - Used `net_amount` for nominal tax-bearing accounts to prevent double-counting tax.
+  - Preserved Tally Prime XML convention where negative amounts represent Debit entries.
+- **High #6 - Lakh-Comma Amount Parsing & Unparseable Date Defense (`ledgergpt/tally_sync.py`)**:
+  - Implemented `clean_amount()` stripping Indian commas, handling Dr/Cr suffixes, and eliminating `ValueError` 0.0 zeroing.
+  - Prevented silent fabrication of today's date for bad dates; recorded unparseable dates into `self.rejected_records`.
+- **High #7 - Aging Filter by Fiscal Year (`ledgergpt/dashboard_service.py`)**:
+  - Added fiscal year date range boundary filter on `bills_outstanding` query.
+- **High #8 - LLM SQL Guardrails (`ledgergpt/query_engine.py`)**:
+  - Injected mandatory `LIMIT 100` on LLM-generated SQL statements.
+- **Medium & Low Cleanups (#9-#22)**:
+  - FTS5 multi-word phrase quotation (`" OR ".join(f'"{k}"' for k in keywords)`).
+  - Whole-word matching for Section 269SS scanner (`' ' || LOWER(party) || ' ' LIKE '% cash %'`), preventing false positives on *Akash*.
+  - Benford's Law formatted float representation avoiding scientific notation noise.
+  - Web export endpoint capping at 50,000 rows and filename path traversal sanitization.
+  - Route alias `/api/tally-sync` matching README.
+  - Setup.py packaging fix with `py_modules=["cli"]` and entry point `ledgergpt=ledgergpt.cli:main`.
+  - Replaced `sys.stdout = io.TextIOWrapper(...)` with `sys.stdout.reconfigure(encoding='utf-8')`.
+  - Escaped `'` as `&#39;` in `escapeHtml()` and sanitized `err.message` in web modal DOM.
+- **Regression Suite**: Added `tests/test_qc_remediation.py` (7 tests). All 34 tests passing (`34/34 OK`).
+- **Audit Workbook**: Delivered `LedgerGPT_QC_Audit_and_Remediation_Plan.xlsx` (3 sheets).
+
 ## [1.4.0] - 2026-10-29
 ### Added & Delivered - Option A External Intelligence Integration (EasyReports & CA Ramajayam Benchmark)
 - **Bill-by-Bill Debtor & Creditor Aging Intelligence Cockpit**:

@@ -16,12 +16,36 @@ from ledgergpt.db import FinancialDB
 from ledgergpt.formatters import parse_date, get_financial_year, get_financial_quarter
 
 
+def clean_amount(val_str):
+    """
+    Cleans amount strings, stripping commas, whitespace, and Dr/Cr suffixes.
+    Preserves Tally XML convention: negative values are Debits, positive are Credits.
+    """
+    if not val_str:
+        return 0.0
+    s = str(val_str).replace(",", "").strip()
+    is_dr = s.endswith("Dr") or s.endswith("dr")
+    is_cr = s.endswith("Cr") or s.endswith("cr")
+    if is_dr or is_cr:
+        s = s[:-2].strip()
+    try:
+        val = float(s)
+        if is_dr and val > 0:
+            val = -val
+        elif is_cr and val < 0:
+            val = abs(val)
+        return val
+    except ValueError:
+        return 0.0
+
+
 class TallySyncEngine:
     def __init__(self, host=None, port=None, db=None):
         self.host = host or TALLY_HOST
         self.port = port or TALLY_PORT
         self.url = f"http://{self.host}:{self.port}"
         self.db = db or FinancialDB()
+        self.rejected_records = []
 
     def check_connection(self):
         """Pings Tally Prime HTTP interface to check availability."""
@@ -160,13 +184,21 @@ class TallySyncEngine:
             if not dt_raw or not vtype or vtype == "None":
                 continue
             # Tally dates are typically YYYYMMDD
+            dt_obj = None
             if len(dt_raw) == 8 and dt_raw.isdigit():
                 try:
                     dt_obj = datetime.strptime(dt_raw, "%Y%m%d")
                 except ValueError:
-                    dt_obj = datetime.now()
+                    dt_obj = None
             else:
-                dt_obj = parse_date(dt_raw) or datetime.now()
+                dt_obj = parse_date(dt_raw)
+
+            if not dt_obj:
+                self.rejected_records.append({
+                    "voucher_no": vch.findtext("VOUCHERNUMBER") or "",
+                    "reason": f"Unparseable date: '{dt_raw}'"
+                })
+                continue
 
             dt_str = dt_obj.strftime("%Y-%m-%d")
             fy_str = get_financial_year(dt_obj)
@@ -191,10 +223,7 @@ class TallySyncEngine:
             for lentry in vch.findall(".//ALLLEDGERENTRIES.LIST") + vch.findall(".//LEDGERENTRIES.LIST"):
                 lname = (lentry.findtext("LEDGERNAME") or "").strip()
                 amt_str = (lentry.findtext("AMOUNT") or "0").strip()
-                try:
-                    amt_val = float(amt_str)
-                except ValueError:
-                    amt_val = 0.0
+                amt_val = clean_amount(amt_str)
 
                 ledgers.append((lname, amt_val))
 
@@ -263,12 +292,12 @@ class TallySyncEngine:
 </ENVELOPE>"""
         balances = {
             "bank_balance": 0.0,
-            "cash_in_hand": 89468.0,  # Default fallback if cash ledger not in top groups
+            "cash_in_hand": 0.0,
             "current_assets": 0.0,
             "current_liabilities": 0.0,
             "sundry_debtors": 0.0,
             "sundry_creditors": 0.0,
-            "bank_name": "AXIS BANK (INDIA)"
+            "bank_name": "Primary Bank"
         }
         try:
             req = urllib.request.Request(self.url, data=xml_req.encode("utf-8"), headers={"Content-Type": "text/xml; charset=utf-8"})
@@ -281,7 +310,7 @@ class TallySyncEngine:
                 root = ET.fromstring(text)
                 for g in root.findall(".//GROUP"):
                     name = (g.findtext("NAME") or g.get("NAME") or "").strip()
-                    val_str = (g.findtext("CLOSINGBALANCE") or "0").strip()
+                    val_str = (g.findtext("CLOSINGBALANCE") or "0").replace(",", "").strip()
                     try:
                         val = abs(float(val_str))
                     except ValueError:
