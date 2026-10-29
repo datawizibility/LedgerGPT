@@ -122,6 +122,15 @@ def run_forensic():
     report = scanner.run_full_forensic_suite()
     return jsonify(report)
 
+@app.route("/api/tally-companies", methods=["GET"])
+def get_tally_companies():
+    sync_engine = TallySyncEngine(db=db)
+    ok, msg = sync_engine.check_connection()
+    if not ok:
+        return jsonify({"connected": False, "error": msg, "companies": []})
+    comps = sync_engine.get_open_companies()
+    return jsonify({"connected": True, "companies": comps})
+
 @app.route("/api/sync-tally", methods=["POST"])
 def sync_tally():
     data = request.get_json() or {}

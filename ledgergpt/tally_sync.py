@@ -103,9 +103,11 @@ class TallySyncEngine:
 
     def fetch_vouchers(self, company_name=None):
         """Fetches all vouchers for the specified company (or default open company)."""
+        import html
         static_var = ""
         if company_name:
-            static_var = f"<SVCURRENTCOMPANY>{company_name}</SVCURRENTCOMPANY>"
+            escaped_co = html.escape(company_name)
+            static_var = f"<SVCURRENTCOMPANY>{escaped_co}</SVCURRENTCOMPANY>"
 
         xml_req = f"""<ENVELOPE>
   <HEADER>
@@ -118,6 +120,8 @@ class TallySyncEngine:
     <DESC>
       <STATICVARIABLES>
         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <SVFROMDATE>19900101</SVFROMDATE>
+        <SVTODATE>20991231</SVTODATE>
         {static_var}
       </STATICVARIABLES>
       <TDL>
@@ -152,6 +156,9 @@ class TallySyncEngine:
         for vch in root.findall(".//VOUCHER"):
             # Date
             dt_raw = (vch.findtext("DATE") or "").strip()
+            vtype = (vch.findtext("VOUCHERTYPENAME") or "").strip()
+            if not dt_raw or not vtype or vtype == "None":
+                continue
             # Tally dates are typically YYYYMMDD
             if len(dt_raw) == 8 and dt_raw.isdigit():
                 try:

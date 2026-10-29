@@ -563,6 +563,33 @@ function openSyncModal() {
     document.getElementById('syncModal').style.display = 'flex';
     const msg = document.getElementById('syncStatusMsg');
     msg.style.display = 'none';
+
+    const select = document.getElementById('syncCompanySelect');
+    if (select) {
+        select.innerHTML = '<option value="">Detecting open companies from Tally...</option>';
+        select.disabled = true;
+
+        fetch('/api/tally-companies')
+            .then(res => res.json())
+            .then(data => {
+                if (data.connected && data.companies && data.companies.length > 0) {
+                    select.disabled = false;
+                    select.innerHTML = data.companies.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+                    
+                    // Auto-select Latehar if available
+                    const latehar = data.companies.find(c => c.toUpperCase().includes('LATEHAR'));
+                    if (latehar) {
+                        select.value = latehar;
+                    }
+                } else {
+                    select.innerHTML = `<option value="">⚠️ No companies detected (${data.error || 'Check Tally'})</option>`;
+                }
+            })
+            .catch(err => {
+                select.innerHTML = `<option value="">⚠️ Error communicating with Tally: ${escapeHtml(err.message)}</option>`;
+            });
+    }
+
     document.getElementById('startSyncBtn').disabled = false;
     document.getElementById('startSyncBtn').innerText = 'Start Live Sync';
 }
@@ -575,6 +602,13 @@ function executeTallySync() {
     const btn = document.getElementById('startSyncBtn');
     const msg = document.getElementById('syncStatusMsg');
     const clearDb = document.getElementById('syncClearDb').checked;
+    const select = document.getElementById('syncCompanySelect');
+    const chosenCompany = select ? select.value : '';
+
+    if (!chosenCompany) {
+        alert('Please select an active company from the dropdown before starting sync.');
+        return;
+    }
 
     btn.disabled = true;
     btn.innerText = 'Connecting to Tally...';
@@ -582,12 +616,16 @@ function executeTallySync() {
     msg.style.background = '#EBF5FB';
     msg.style.color = '#154360';
     msg.style.border = '1px solid #AED6F1';
-    msg.innerHTML = '⏳ <strong>Querying Tally Prime on port 9000...</strong> Extracting active company vouchers.';
+    msg.innerHTML = `⏳ <strong>Querying Tally Prime for '${escapeHtml(chosenCompany)}'...</strong> Extracting vouchers across all periods.`;
 
     fetch('/api/sync-tally', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clear_existing: clearDb })
+        body: JSON.stringify({ 
+            company_name: chosenCompany,
+            clear_existing: clearDb 
+        })
+    })
     })
     .then(async res => {
         const data = await res.json();

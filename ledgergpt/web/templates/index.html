@@ -290,14 +290,22 @@
                 <button class="btn-close" onclick="closeSyncModal()">&times;</button>
             </div>
             <div class="modal-body" id="syncModalBody">
-                <p style="margin-bottom: 15px; font-size: 13px; line-height: 1.5;">
-                    Ensure <strong>Tally Prime is open</strong> with ODBC / Client Server enabled on port 9000. LedgerGPT will connect, detect the currently loaded company, and extract all vouchers into your local database.
+                <p style="margin-bottom: 12px; font-size: 12.5px; line-height: 1.5; color: #495057;">
+                    Select any company currently open in Tally Prime to sync its complete voucher history and narrations into LedgerGPT.
                 </p>
-                <div style="background: #F8F9FA; padding: 14px; border-radius: 6px; border: 1px solid #E9ECEF; margin-bottom: 18px;">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; cursor: pointer;">
-                        <input type="checkbox" id="syncClearDb" style="margin-right: 6px;"> Replace existing vouchers with new company data
+                <div style="margin-bottom: 14px;">
+                    <label style="display: block; font-size: 11.5px; font-weight: 700; color: #1B365D; margin-bottom: 5px;">
+                        🏢 Active Company in Tally:
                     </label>
-                    <small style="color: #6c757d; display: block;">If unchecked, vouchers will be appended into the database alongside existing records.</small>
+                    <select id="syncCompanySelect" style="width: 100%; padding: 8px 10px; font-size: 12.5px; border: 1px solid #CED4DA; border-radius: 6px; outline: none; background: #fff;">
+                        <option value="">Detecting open companies from Tally...</option>
+                    </select>
+                </div>
+                <div style="background: #F8F9FA; padding: 12px; border-radius: 6px; border: 1px solid #E9ECEF; margin-bottom: 16px;">
+                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; cursor: pointer;">
+                        <input type="checkbox" id="syncClearDb" checked style="margin-right: 6px;"> Replace existing vouchers with this company's data
+                    </label>
+                    <small style="color: #6c757d; display: block; font-size: 11px;">Recommended when switching companies so reports remain isolated and clean.</small>
                 </div>
                 <div id="syncStatusMsg" style="display: none; padding: 12px; border-radius: 6px; font-size: 13px; margin-bottom: 15px;"></div>
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
