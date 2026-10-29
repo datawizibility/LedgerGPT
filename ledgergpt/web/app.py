@@ -12,6 +12,7 @@ from ledgergpt.query_engine import QueryEngine
 from ledgergpt.ingestor import DataIngestor
 from ledgergpt.forensic import ForensicScanner
 from ledgergpt.formatters import format_inr
+from ledgergpt.tally_sync import TallySyncEngine
 
 template_dir = os.path.join(os.path.dirname(__file__), "templates")
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -93,6 +94,27 @@ def export_csv():
 def run_forensic():
     report = scanner.run_full_forensic_suite()
     return jsonify(report)
+
+@app.route("/api/sync-tally", methods=["POST"])
+def sync_tally():
+    data = request.get_json() or {}
+    company_name = data.get("company_name")
+    clear_existing = data.get("clear_existing", False)
+    
+    sync_engine = TallySyncEngine(db=db)
+    result = sync_engine.sync(company_name=company_name, clear_existing=clear_existing)
+    
+    if result.get("success"):
+        # Enrich with formatted KPIs
+        kpis = result.get("kpis", {})
+        kpis["sales_formatted"] = format_inr(kpis.get("total_sales_gross", 0))
+        kpis["purchase_formatted"] = format_inr(kpis.get("total_purchase_gross", 0))
+        kpis["debit_formatted"] = format_inr(kpis.get("total_debit_notes_gross", 0))
+        kpis["credit_formatted"] = format_inr(kpis.get("total_credit_notes_gross", 0))
+        result["kpis"] = kpis
+        return jsonify(result)
+    else:
+        return jsonify(result), 400
 
 @app.route("/api/ingest_sample", methods=["POST"])
 def ingest_sample():

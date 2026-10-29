@@ -13,6 +13,7 @@ from ledgergpt.forensic import ForensicScanner
 from ledgergpt.ingestor import DataIngestor
 from ledgergpt.formatters import format_inr
 from ledgergpt.config import SAMPLE_DATA_DIR
+from ledgergpt.tally_sync import TallySyncEngine
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
@@ -77,6 +78,9 @@ def main():
     parser.add_argument("--forensic", action="store_true", help="Run full forensic audit scanner")
     parser.add_argument("--ingest", type=str, help="Ingest a CSV register into the database")
     parser.add_argument("--init-sample", action="store_true", help="Ingest preloaded sample data")
+    parser.add_argument("--sync-tally", action="store_true", help="Sync vouchers live from active Tally Prime company")
+    parser.add_argument("--company", type=str, help="Specify company name for Tally sync")
+    parser.add_argument("--clear", action="store_true", help="Clear existing vouchers before sync")
 
     args = parser.parse_args()
 
@@ -115,6 +119,19 @@ def main():
         ingestor = DataIngestor(db=db)
         cnt = ingestor.ingest_sample_dataset(SAMPLE_DATA_DIR)
         print(f"[SUCCESS] Ingested sample dataset: {cnt:,} total vouchers.")
+        return
+
+    if args.sync_tally:
+        print("\nConnecting to Tally Prime on port 9000...")
+        sync_engine = TallySyncEngine(db=db)
+        res = sync_engine.sync(company_name=args.company, clear_existing=args.clear)
+        if res.get("success"):
+            print(f"[SUCCESS] {res.get('message')}")
+            k = res.get("kpis", {})
+            print(f"Total Vouchers in DB: {k.get('total_vouchers', 0):,}")
+            print(f"Sales: {format_inr(k.get('total_sales_gross', 0))} | Purchases: {format_inr(k.get('total_purchase_gross', 0))}")
+        else:
+            print(f"[ERROR] {res.get('error')}")
         return
 
     if args.query:

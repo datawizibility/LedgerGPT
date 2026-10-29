@@ -111,6 +111,14 @@ body {
     background: rgba(255,255,255,0.1);
 }
 
+.btn-sync {
+    background: #27AE60;
+    color: #fff;
+}
+.btn-sync:hover {
+    background: #219653;
+}
+
 /* KPI BANNER */
 .kpi-banner {
     background: #fff;

@@ -160,6 +160,82 @@ function closeForensicModal() {
     document.getElementById('forensicModal').style.display = 'none';
 }
 
+function openSyncModal() {
+    document.getElementById('syncModal').style.display = 'flex';
+    const msg = document.getElementById('syncStatusMsg');
+    msg.style.display = 'none';
+    document.getElementById('startSyncBtn').disabled = false;
+    document.getElementById('startSyncBtn').innerText = 'Start Live Sync';
+}
+
+function closeSyncModal() {
+    document.getElementById('syncModal').style.display = 'none';
+}
+
+function executeTallySync() {
+    const btn = document.getElementById('startSyncBtn');
+    const msg = document.getElementById('syncStatusMsg');
+    const clearDb = document.getElementById('syncClearDb').checked;
+
+    btn.disabled = true;
+    btn.innerText = 'Connecting to Tally...';
+    msg.style.display = 'block';
+    msg.style.background = '#EBF5FB';
+    msg.style.color = '#154360';
+    msg.style.border = '1px solid #AED6F1';
+    msg.innerHTML = '⏳ <strong>Querying Tally Prime on port 9000...</strong> Extracting active company vouchers.';
+
+    fetch('/api/sync-tally', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear_existing: clearDb })
+    })
+    .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || 'Failed to sync with Tally');
+        }
+        return data;
+    })
+    .then(data => {
+        msg.style.background = '#EAFAF1';
+        msg.style.color = '#145A32';
+        msg.style.border = '1px solid #A9DFBF';
+        msg.innerHTML = `✅ <strong>${escapeHtml(data.message)}</strong>`;
+
+        // Update top KPI cards live
+        if (data.kpis) {
+            const k = data.kpis;
+            if (document.getElementById('kpiVouchers')) document.getElementById('kpiVouchers').innerText = (k.total_vouchers || 0).toLocaleString();
+            if (document.getElementById('kpiSales')) document.getElementById('kpiSales').innerText = k.sales_formatted || '₹ 0.00';
+            if (document.getElementById('kpiPurch')) document.getElementById('kpiPurch').innerText = k.purchase_formatted || '₹ 0.00';
+            if (document.getElementById('kpiDebit')) document.getElementById('kpiDebit').innerText = k.debit_formatted || '₹ 0.00';
+            if (document.getElementById('kpiCredit')) document.getElementById('kpiCredit').innerText = k.credit_formatted || '₹ 0.00';
+        }
+
+        // Add notice to chat stream
+        appendAssistantMessage({
+            answer: `🎉 **Tally Sync Complete!** Successfully synced **${data.vouchers_synced.toLocaleString()} vouchers** from active company: **${escapeHtml(data.company_name)}**.\n- Total Active Vouchers: **${(data.kpis.total_vouchers || 0).toLocaleString()}**\n- Gross Sales: **${data.kpis.sales_formatted}**\n- Gross Purchases: **${data.kpis.purchase_formatted}**\n\nYou can now ask questions about ${escapeHtml(data.company_name)}!`,
+            data: [],
+            sql: ''
+        });
+
+        setTimeout(() => {
+            closeSyncModal();
+        }, 1800);
+    })
+    .catch(err => {
+        msg.style.background = '#FDEDEC';
+        msg.style.color = '#78281F';
+        msg.style.border = '1px solid #F5B7B1';
+        msg.innerHTML = `⚠️ <strong>Sync Error:</strong> ${escapeHtml(err.message)}<br><small style="display:block; margin-top:4px;">Check: 1) Is Tally Prime open? 2) Is ODBC/Server enabled on port 9000?</small>`;
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerText = 'Start Live Sync';
+    });
+}
+
 function loadForensicScan() {
     const body = document.getElementById('forensicModalBody');
     body.innerHTML = '<div style="text-align:center; padding: 40px;">⏳ Running full statistical & forensic scan across all vouchers...</div>';

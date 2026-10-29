@@ -18,6 +18,7 @@
             </div>
         </div>
         <div class="nav-actions">
+            <button class="btn btn-sync" id="syncTallyBtn" onclick="openSyncModal()">🔄 Sync Active Tally</button>
             <button class="btn btn-outline" onclick="openForensicModal()">🛡️ Forensic Audit Scanner</button>
             <button class="btn btn-primary" onclick="showKpisModal()">📈 Portfolio Metrics</button>
         </div>
@@ -102,6 +103,35 @@
             <div class="modal-body" id="forensicModalBody">
                 <div style="text-align: center; padding: 30px;">
                     <button class="btn btn-primary" onclick="loadForensicScan()">▶ Run Full Forensic Suite</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TALLY SYNC MODAL -->
+    <div id="syncModal" class="modal-overlay" style="display: none;">
+        <div class="modal-card" style="max-width: 550px;">
+            <div class="modal-header">
+                <div>
+                    <h3 style="margin: 0; color: #1B365D;">🔄 Sync from Active Tally Prime</h3>
+                    <small style="color: #6c757d;">Direct live extraction over localhost port 9000</small>
+                </div>
+                <button class="btn-close" onclick="closeSyncModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="syncModalBody">
+                <p style="margin-bottom: 15px; font-size: 13px; line-height: 1.5;">
+                    Ensure <strong>Tally Prime is open</strong> with ODBC / Client Server enabled on port 9000. LedgerGPT will connect, detect the currently loaded company, and extract all vouchers into your local database.
+                </p>
+                <div style="background: #F8F9FA; padding: 14px; border-radius: 6px; border: 1px solid #E9ECEF; margin-bottom: 18px;">
+                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; cursor: pointer;">
+                        <input type="checkbox" id="syncClearDb" style="margin-right: 6px;"> Replace existing vouchers with new company data
+                    </label>
+                    <small style="color: #6c757d; display: block;">If unchecked, vouchers will be appended into the database alongside existing records.</small>
+                </div>
+                <div id="syncStatusMsg" style="display: none; padding: 12px; border-radius: 6px; font-size: 13px; margin-bottom: 15px;"></div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="btn btn-outline" style="color: #333; border-color: #ccc;" onclick="closeSyncModal()">Cancel</button>
+                    <button class="btn btn-sync" id="startSyncBtn" onclick="executeTallySync()">Start Live Sync</button>
                 </div>
             </div>
         </div>
