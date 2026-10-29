@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LedgerGPT — Enterprise Conversational Financial Intelligence</title>
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="navbar">
+        <div class="nav-brand">
+            <div class="logo-icon">📊</div>
+            <div>
+                <div class="brand-title">LedgerGPT <span class="badge-pro">ENTERPRISE</span></div>
+                <div class="brand-sub">Zero-Hallucination Conversational Finance Engine for ERP & Tally Prime</div>
+            </div>
+        </div>
+        <div class="nav-actions">
+            <button class="btn btn-outline" onclick="openForensicModal()">🛡️ Forensic Audit Scanner</button>
+            <button class="btn btn-primary" onclick="showKpisModal()">📈 Portfolio Metrics</button>
+        </div>
+    </header>
+
+    <!-- KPI SUMMARY BAR -->
+    <section class="kpi-banner">
+        <div class="kpi-item">
+            <span class="kpi-label">Total Audited Vouchers</span>
+            <span class="kpi-val" id="kpiVouchers">{{ kpis.total_vouchers | default(0) }}</span>
+        </div>
+        <div class="kpi-item">
+            <span class="kpi-label">Gross Sales Volume</span>
+            <span class="kpi-val green" id="kpiSales">{{ format_inr(kpis.total_sales_gross) }}</span>
+        </div>
+        <div class="kpi-item">
+            <span class="kpi-label">Gross Purchases</span>
+            <span class="kpi-val orange" id="kpiPurch">{{ format_inr(kpis.total_purchase_gross) }}</span>
+        </div>
+        <div class="kpi-item">
+            <span class="kpi-label">Debit Notes (Deductions)</span>
+            <span class="kpi-val maroon" id="kpiDebit">{{ format_inr(kpis.total_debit_notes_gross) }}</span>
+        </div>
+        <div class="kpi-item">
+            <span class="kpi-label">Credit Notes (Rebates)</span>
+            <span class="kpi-val blue" id="kpiCredit">{{ format_inr(kpis.total_credit_notes_gross) }}</span>
+        </div>
+    </section>
+
+    <!-- MAIN CHAT CONTAINER -->
+    <main class="chat-container">
+        <!-- CHAT STREAM -->
+        <div class="chat-stream" id="chatStream">
+            <!-- WELCOME MESSAGE -->
+            <div class="msg-bubble assistant">
+                <div class="msg-avatar">🤖</div>
+                <div class="msg-body">
+                    <div class="msg-header">
+                        <strong>LedgerGPT Intelligence Engine</strong>
+                        <span class="msg-tag">Ready</span>
+                    </div>
+                    <p>Welcome! I am connected to your genuine ERP / Tally database with <strong>100% deterministic accuracy</strong>. Every figure I provide is verified directly against underlying voucher ledgers with full narration audit trails.</p>
+                    
+                    <div class="prompt-pills-title">Quick Inquiries You Can Click:</div>
+                    <div class="prompt-pills">
+                        <button class="pill" onclick="sendQuickQuery('Total sales in FY 2017-18')">💰 Total sales in FY 2017-18</button>
+                        <button class="pill" onclick="sendQuickQuery('Top 10 clients by gross billed amount')">🏆 Top 10 clients by revenue</button>
+                        <button class="pill" onclick="sendQuickQuery('Total purchases and top 10 vendors')">🛒 Total purchases & top vendors</button>
+                        <button class="pill" onclick="sendQuickQuery('Show all Debit Notes issued')">📑 Show all Debit Notes</button>
+                        <button class="pill" onclick="sendQuickQuery('Show all Credit Notes issued')">📋 Show all Credit Notes</button>
+                        <button class="pill" onclick="sendQuickQuery('Vouchers with narration containing cancel')">🔍 Search narrations for 'cancel'</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- INPUT BAR -->
+        <div class="input-panel">
+            <form id="chatForm" onsubmit="handleChatSubmit(event)">
+                <div class="input-wrapper">
+                    <input type="text" id="userInput" placeholder="Ask any financial, voucher, debtor, or ledger question (e.g. 'Top 5 debtors', 'Sales in Q2', 'Debit notes for cancellation')..." autocomplete="off" required>
+                    <button type="submit" class="btn btn-send" id="sendBtn">Ask LedgerGPT ↵</button>
+                </div>
+            </form>
+            <div class="input-footnote">
+                <span>🛡️ <strong>Zero-Hallucination Policy:</strong> Answers derived from verified SQL execution against local database.</span>
+                <span style="float: right;">Connected Database: <strong>Genesis 2-Year Audited Data (50,102 Vouchers)</strong></span>
+            </div>
+        </div>
+    </main>
+
+    <!-- FORENSIC SCANNER MODAL -->
+    <div id="forensicModal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div>
+                    <h3 style="margin: 0; color: #800000;">🛡️ Forensic Audit & Anomaly Detection Suite</h3>
+                    <small style="color: #6c757d;">Statistical tests, Benford's Law, duplicate billings & suspicious narration inspection.</small>
+                </div>
+                <button class="btn-close" onclick="closeForensicModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="forensicModalBody">
+                <div style="text-align: center; padding: 30px;">
+                    <button class="btn btn-primary" onclick="loadForensicScan()">▶ Run Full Forensic Suite</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
