@@ -13,6 +13,7 @@ from ledgergpt.ingestor import DataIngestor
 from ledgergpt.forensic import ForensicScanner
 from ledgergpt.formatters import format_inr
 from ledgergpt.tally_sync import TallySyncEngine
+from ledgergpt.dashboard_service import DashboardService
 
 template_dir = os.path.join(os.path.dirname(__file__), "templates")
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -23,6 +24,7 @@ app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 db = FinancialDB(DB_PATH)
 engine = QueryEngine(db=db)
 scanner = ForensicScanner(db=db)
+dashboard_service = DashboardService(db=db)
 
 # Ensure sample data is loaded if DB is empty
 with db.get_connection() as conn:
@@ -48,6 +50,31 @@ def get_kpis():
     kpis["debit_formatted"] = format_inr(kpis.get("total_debit_notes_gross", 0))
     kpis["credit_formatted"] = format_inr(kpis.get("total_credit_notes_gross", 0))
     return jsonify(kpis)
+
+# --- DASHBOARD ANALYTICS ENDPOINTS ---
+@app.route("/api/dashboard/summary", methods=["GET"])
+def get_dashboard_summary():
+    return jsonify(dashboard_service.get_executive_summary())
+
+@app.route("/api/dashboard/monthly-trend", methods=["GET"])
+def get_dashboard_monthly_trend():
+    return jsonify(dashboard_service.get_monthly_trend())
+
+@app.route("/api/dashboard/rankings", methods=["GET"])
+def get_dashboard_rankings():
+    top_n = request.args.get("top_n", 10, type=int)
+    return jsonify(dashboard_service.get_rankings(top_n=top_n))
+
+@app.route("/api/dashboard/vouchers-grid", methods=["GET"])
+def get_dashboard_vouchers_grid():
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 50, type=int)
+    vtype = request.args.get("type", None, type=str)
+    fy = request.args.get("fy", None, type=str)
+    search = request.args.get("search", None, type=str)
+    return jsonify(dashboard_service.get_vouchers_grid(
+        page=page, page_size=page_size, vtype=vtype, search=search, fy=fy
+    ))
 
 @app.route("/api/chat", methods=["POST"])
 def chat():

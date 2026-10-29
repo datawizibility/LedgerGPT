@@ -3,92 +3,263 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LedgerGPT — Enterprise Conversational Financial Intelligence</title>
+    <title>LedgerGPT Enterprise — Conversational Finance & Executive Analytics Cockpit</title>
     <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body>
-    <!-- HEADER -->
+<body class="view-split">
+    <!-- TOP NAVIGATION BAR -->
     <header class="navbar">
         <div class="nav-brand">
             <div class="logo-icon">📊</div>
             <div>
                 <div class="brand-title">LedgerGPT <span class="badge-pro">ENTERPRISE</span></div>
-                <div class="brand-sub">Zero-Hallucination Conversational Finance Engine for ERP & Tally Prime</div>
+                <div class="brand-sub">Zero-Hallucination Finance Intelligence for ERP & Tally Prime</div>
             </div>
         </div>
+
+        <!-- VIEW MODE SELECTOR -->
+        <div class="view-switcher">
+            <button class="switch-btn active" id="btnViewSplit" onclick="setViewMode('split')">⊞ Split Cockpit</button>
+            <button class="switch-btn" id="btnViewDash" onclick="setViewMode('dashboard')">📊 Full Dashboard</button>
+            <button class="switch-btn" id="btnViewChat" onclick="setViewMode('chat')">💬 Copilot Focus</button>
+        </div>
+
+        <!-- TOP ACTIONS -->
         <div class="nav-actions">
             <button class="btn btn-sync" id="syncTallyBtn" onclick="openSyncModal()">🔄 Sync Active Tally</button>
             <button class="btn btn-outline" onclick="openForensicModal()">🛡️ Forensic Audit Scanner</button>
-            <button class="btn btn-primary" onclick="showKpisModal()">📈 Portfolio Metrics</button>
         </div>
     </header>
 
-    <!-- KPI SUMMARY BAR -->
-    <section class="kpi-banner">
-        <div class="kpi-item">
-            <span class="kpi-label">Total Audited Vouchers</span>
-            <span class="kpi-val" id="kpiVouchers">{{ kpis.total_vouchers | default(0) }}</span>
-        </div>
-        <div class="kpi-item">
-            <span class="kpi-label">Gross Sales Volume</span>
-            <span class="kpi-val green" id="kpiSales">{{ format_inr(kpis.total_sales_gross) }}</span>
-        </div>
-        <div class="kpi-item">
-            <span class="kpi-label">Gross Purchases</span>
-            <span class="kpi-val orange" id="kpiPurch">{{ format_inr(kpis.total_purchase_gross) }}</span>
-        </div>
-        <div class="kpi-item">
-            <span class="kpi-label">Debit Notes (Deductions)</span>
-            <span class="kpi-val maroon" id="kpiDebit">{{ format_inr(kpis.total_debit_notes_gross) }}</span>
-        </div>
-        <div class="kpi-item">
-            <span class="kpi-label">Credit Notes (Rebates)</span>
-            <span class="kpi-val blue" id="kpiCredit">{{ format_inr(kpis.total_credit_notes_gross) }}</span>
-        </div>
-    </section>
+    <!-- UNIFIED APPLICATION CONTAINER -->
+    <div class="app-container" id="appContainer">
+        
+        <!-- ==================== LEFT: EXECUTIVE FINANCIAL DASHBOARD ==================== -->
+        <section class="dashboard-pane" id="dashboardPane">
+            
+            <!-- EXECUTIVE KPI STRIP -->
+            <div class="dash-kpi-banner">
+                <div class="dash-kpi-card green-card">
+                    <span class="dash-kpi-label">Gross Revenue (Sales)</span>
+                    <span class="dash-kpi-val" id="kpiDashSales">Loading...</span>
+                    <span class="dash-kpi-sub" id="kpiDashSalesNet"></span>
+                </div>
+                <div class="dash-kpi-card orange-card">
+                    <span class="dash-kpi-label">Direct Costs (Purchases)</span>
+                    <span class="dash-kpi-val" id="kpiDashPurch">Loading...</span>
+                    <span class="dash-kpi-sub" id="kpiDashPurchNet"></span>
+                </div>
+                <div class="dash-kpi-card teal-card">
+                    <span class="dash-kpi-label">Gross Operating Margin</span>
+                    <span class="dash-kpi-val" id="kpiDashMargin">Loading...</span>
+                    <span class="dash-kpi-sub" id="kpiDashMarginPct">Margin %: --</span>
+                </div>
+                <div class="dash-kpi-card maroon-card">
+                    <span class="dash-kpi-label">Debit Notes (Deductions)</span>
+                    <span class="dash-kpi-val" id="kpiDashDebit">Loading...</span>
+                    <span class="dash-kpi-sub" id="kpiDashDebitCount"></span>
+                </div>
+                <div class="dash-kpi-card blue-card">
+                    <span class="dash-kpi-label">Credit Notes (Rebates)</span>
+                    <span class="dash-kpi-val" id="kpiDashCredit">Loading...</span>
+                    <span class="dash-kpi-sub" id="kpiDashCreditCount"></span>
+                </div>
+                <div class="dash-kpi-card slate-card">
+                    <span class="dash-kpi-label">Total Audited Vouchers</span>
+                    <span class="dash-kpi-val" id="kpiDashVouchers">50,102</span>
+                    <span class="dash-kpi-sub" id="kpiDashParties"></span>
+                </div>
+            </div>
 
-    <!-- MAIN CHAT CONTAINER -->
-    <main class="chat-container">
-        <!-- CHAT STREAM -->
-        <div class="chat-stream" id="chatStream">
-            <!-- WELCOME MESSAGE -->
-            <div class="msg-bubble assistant">
-                <div class="msg-avatar">🤖</div>
-                <div class="msg-body">
-                    <div class="msg-header">
-                        <strong>LedgerGPT Intelligence Engine</strong>
-                        <span class="msg-tag">Ready</span>
+            <!-- DASHBOARD CHARTS & ANALYTICS SECTION -->
+            <div class="dash-content-scroll">
+                
+                <!-- ROW 1: 24-MONTH REVENUE VS EXPENSE TREND -->
+                <div class="dash-card">
+                    <div class="dash-card-header">
+                        <div>
+                            <h3 class="dash-card-title">📈 24-Month Revenue vs. Purchases & Margin Curve</h3>
+                            <span class="dash-card-subtitle">Monthly trajectory across FY 2017-18 and FY 2018-19</span>
+                        </div>
+                        <div class="chart-legend-badge">
+                            <span class="legend-dot green"></span> Sales Billed
+                            <span class="legend-dot orange"></span> Vendor Invoices
+                            <span class="legend-dot teal"></span> Margin
+                        </div>
                     </div>
-                    <p>Welcome! I am connected to your genuine ERP / Tally database with <strong>100% deterministic accuracy</strong>. Every figure I provide is verified directly against underlying voucher ledgers with full narration audit trails.</p>
-                    
-                    <div class="prompt-pills-title">Quick Inquiries You Can Click:</div>
-                    <div class="prompt-pills">
-                        <button class="pill" onclick="sendQuickQuery('Total sales in FY 2017-18')">💰 Total sales in FY 2017-18</button>
-                        <button class="pill" onclick="sendQuickQuery('Top 10 clients by gross billed amount')">🏆 Top 10 clients by revenue</button>
-                        <button class="pill" onclick="sendQuickQuery('Total purchases and top 10 vendors')">🛒 Total purchases & top vendors</button>
-                        <button class="pill" onclick="sendQuickQuery('Show all Debit Notes issued')">📑 Show all Debit Notes</button>
-                        <button class="pill" onclick="sendQuickQuery('Show all Credit Notes issued')">📋 Show all Credit Notes</button>
-                        <button class="pill" onclick="sendQuickQuery('Vouchers with narration containing cancel')">🔍 Search narrations for 'cancel'</button>
+                    <div class="chart-box" style="height: 280px; position: relative;">
+                        <canvas id="monthlyTrendChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- ROW 2: TOP CLIENTS & TOP VENDORS CONCENTRATION -->
+                <div class="dash-grid-2">
+                    <!-- TOP DEBTORS -->
+                    <div class="dash-card">
+                        <div class="dash-card-header">
+                            <div>
+                                <h3 class="dash-card-title">🏆 Top 10 Clients / Debtors Concentration</h3>
+                                <span class="dash-card-subtitle">Ranked by gross billing volume (Click bar to analyze)</span>
+                            </div>
+                        </div>
+                        <div class="chart-box" style="height: 260px; position: relative;">
+                            <canvas id="topDebtorsChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- TOP CREDITORS -->
+                    <div class="dash-card">
+                        <div class="dash-card-header">
+                            <div>
+                                <h3 class="dash-card-title">🛒 Top 10 Vendors / Media Houses Spend</h3>
+                                <span class="dash-card-subtitle">Ranked by direct subcontract outflows (Click bar to analyze)</span>
+                            </div>
+                        </div>
+                        <div class="chart-box" style="height: 260px; position: relative;">
+                            <canvas id="topCreditorsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ROW 3: COST CENTRE / PROJECT PROFITABILITY WATERFALL -->
+                <div class="dash-card">
+                    <div class="dash-card-header">
+                        <div>
+                            <h3 class="dash-card-title">💼 Business Unit & Project Profitability Analysis</h3>
+                            <span class="dash-card-subtitle">Sales revenue, direct vendor costs, and gross margins by campaign</span>
+                        </div>
+                    </div>
+                    <div class="table-container" style="max-height: 240px;">
+                        <table class="data-table" id="costCentresTable">
+                            <thead>
+                                <tr>
+                                    <th>Cost Centre / Event Name</th>
+                                    <th class="num-cell">Gross Billed</th>
+                                    <th class="num-cell">Direct Outflow</th>
+                                    <th class="num-cell">Gross Margin</th>
+                                    <th class="num-cell">Margin %</th>
+                                    <th style="text-align: center;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="costCentresTableBody">
+                                <tr><td colspan="6" style="text-align:center; padding: 20px;">Loading project profitability...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ROW 4: DEEP DRILLDOWN VOUCHER EXPLORER -->
+                <div class="dash-card" style="margin-bottom: 30px;">
+                    <div class="dash-card-header">
+                        <div>
+                            <h3 class="dash-card-title">📑 Comprehensive Voucher Ledger Explorer</h3>
+                            <span class="dash-card-subtitle">Paginated transactional audit trail across 50,000+ vouchers</span>
+                        </div>
+                        <button class="btn btn-primary" style="font-size: 11px; padding: 5px 12px;" onclick="exportVouchersGrid()">📥 Export View as CSV</button>
+                    </div>
+
+                    <!-- GRID CONTROLS -->
+                    <div class="grid-controls">
+                        <div class="grid-filter-group">
+                            <label>Type:</label>
+                            <select id="gridFilterType" onchange="loadVouchersGrid(1)">
+                                <option value="All">All Types</option>
+                                <option value="Sales">Sales</option>
+                                <option value="Purchase">Purchase</option>
+                                <option value="Debit Note">Debit Note</option>
+                                <option value="Credit Note">Credit Note</option>
+                            </select>
+                        </div>
+                        <div class="grid-filter-group">
+                            <label>FY:</label>
+                            <select id="gridFilterFY" onchange="loadVouchersGrid(1)">
+                                <option value="All">All FYs</option>
+                                <option value="FY 2017-18">FY 2017-18</option>
+                                <option value="FY 2018-19">FY 2018-19</option>
+                            </select>
+                        </div>
+                        <div class="grid-filter-group" style="flex: 1;">
+                            <input type="text" id="gridSearchInput" placeholder="Filter by Party, Cost Centre, Narration, or Voucher #..." onkeyup="debounceGridSearch()">
+                        </div>
+                    </div>
+
+                    <div class="table-container" style="max-height: 280px;">
+                        <table class="data-table" id="vouchersGridTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Type</th>
+                                    <th>Voucher #</th>
+                                    <th>Ref / Bill #</th>
+                                    <th>Party Name</th>
+                                    <th>Cost Centre</th>
+                                    <th class="num-cell">Gross Amount</th>
+                                    <th>Narration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vouchersGridBody">
+                                <tr><td colspan="8" style="text-align:center; padding: 20px;">Loading vouchers...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- PAGINATION FOOTER -->
+                    <div class="grid-pagination">
+                        <span id="gridPageInfo" style="font-size: 12px; color: var(--text-muted);">Showing page 1</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-outline" style="color:#333; padding: 4px 10px; font-size:11px;" id="gridPrevBtn" onclick="changeGridPage(-1)" disabled>◀ Previous</button>
+                            <button class="btn btn-outline" style="color:#333; padding: 4px 10px; font-size:11px;" id="gridNextBtn" onclick="changeGridPage(1)">Next ▶</button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ==================== RIGHT: INTERACTIVE COPILOT CHAT ==================== -->
+        <main class="chat-pane" id="chatPane">
+            
+            <!-- CHAT STREAM -->
+            <div class="chat-stream" id="chatStream">
+                <!-- WELCOME MESSAGE -->
+                <div class="msg-bubble assistant">
+                    <div class="msg-avatar">🤖</div>
+                    <div class="msg-body">
+                        <div class="msg-header">
+                            <strong>LedgerGPT Intelligence Copilot</strong>
+                            <span class="msg-tag">Ready</span>
+                        </div>
+                        <p>Welcome! I am connected to your genuine ERP / Tally database with <strong>100% deterministic accuracy</strong>. Every answer is computed straight from underlying vouchers with zero hallucination.</p>
+                        
+                        <div class="prompt-pills-title">Quick Inquiries You Can Click:</div>
+                        <div class="prompt-pills">
+                            <button class="pill" onclick="sendQuickQuery('Total sales in FY 2017-18')">💰 Total sales in FY 2017-18</button>
+                            <button class="pill" onclick="sendQuickQuery('Top 10 clients by gross billed amount')">🏆 Top 10 clients by revenue</button>
+                            <button class="pill" onclick="sendQuickQuery('Total purchases and top 10 vendors')">🛒 Total purchases & top vendors</button>
+                            <button class="pill" onclick="sendQuickQuery('Show all Debit Notes issued')">📑 Show all Debit Notes</button>
+                            <button class="pill" onclick="sendQuickQuery('Show all Credit Notes issued')">📋 Show all Credit Notes</button>
+                            <button class="pill" onclick="sendQuickQuery('Vouchers with narration containing cancel')">🔍 Search narrations for 'cancel'</button>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- INPUT BAR -->
-        <div class="input-panel">
-            <form id="chatForm" onsubmit="handleChatSubmit(event)">
-                <div class="input-wrapper">
-                    <input type="text" id="userInput" placeholder="Ask any financial, voucher, debtor, or ledger question (e.g. 'Top 5 debtors', 'Sales in Q2', 'Debit notes for cancellation')..." autocomplete="off" required>
-                    <button type="submit" class="btn btn-send" id="sendBtn">Ask LedgerGPT ↵</button>
+            <!-- CHAT INPUT PANEL -->
+            <div class="input-panel">
+                <form id="chatForm" onsubmit="handleChatSubmit(event)">
+                    <div class="input-wrapper">
+                        <input type="text" id="userInput" placeholder="Ask any financial, voucher, debtor, or ledger question (e.g. 'Top 5 debtors', 'Sales in Q2', 'Vouchers for Bennett Coleman')..." autocomplete="off" required>
+                        <button type="submit" class="btn btn-send" id="sendBtn">Ask Copilot ↵</button>
+                    </div>
+                </form>
+                <div class="input-footnote">
+                    <span>🛡️ <strong>Zero-Hallucination Policy:</strong> Verified SQL execution.</span>
+                    <span style="float: right;">Connected: <strong>Genesis Audited Books (50,102 Vouchers)</strong></span>
                 </div>
-            </form>
-            <div class="input-footnote">
-                <span>🛡️ <strong>Zero-Hallucination Policy:</strong> Answers derived from verified SQL execution against local database.</span>
-                <span style="float: right;">Connected Database: <strong>Genesis 2-Year Audited Data (50,102 Vouchers)</strong></span>
             </div>
-        </div>
-    </main>
+        </main>
+    </div>
 
     <!-- FORENSIC SCANNER MODAL -->
     <div id="forensicModal" class="modal-overlay" style="display: none;">
@@ -138,6 +309,7 @@
     </div>
 
     <!-- SCRIPTS -->
+    <script src="/static/js/chart.min.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

@@ -1,7 +1,414 @@
-// LedgerGPT Frontend Engine
+// LedgerGPT Enterprise Financial Dashboard & Copilot Engine
 
+let trendChartInstance = null;
+let debtorsChartInstance = null;
+let creditorsChartInstance = null;
+let currentGridPage = 1;
+let currentGridTotalPages = 1;
+let gridSearchTimer = null;
 let currentQueryData = null;
 
+// ==================== INITIALIZATION ====================
+document.addEventListener('DOMContentLoaded', () => {
+    initDashboard();
+});
+
+function initDashboard() {
+    loadDashboardSummary();
+    loadMonthlyTrend();
+    loadRankings();
+    loadVouchersGrid(1);
+}
+
+// ==================== VIEW MODE SWITCHER ====================
+function setViewMode(mode) {
+    document.body.className = `view-${mode}`;
+    
+    document.querySelectorAll('.switch-btn').forEach(btn => btn.classList.remove('active'));
+    if (mode === 'split') document.getElementById('btnViewSplit').classList.add('active');
+    if (mode === 'dashboard') document.getElementById('btnViewDash').classList.add('active');
+    if (mode === 'chat') document.getElementById('btnViewChat').classList.add('active');
+
+    // Force Chart.js redraw after container dimension shift
+    setTimeout(() => {
+        if (trendChartInstance) trendChartInstance.resize();
+        if (debtorsChartInstance) debtorsChartInstance.resize();
+        if (creditorsChartInstance) creditorsChartInstance.resize();
+    }, 150);
+}
+
+// ==================== EXECUTIVE DASHBOARD DATA ====================
+function loadDashboardSummary() {
+    fetch('/api/dashboard/summary')
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('kpiDashSales').innerText = data.sales_gross_formatted || '₹ 0.00';
+            document.getElementById('kpiDashSalesNet').innerText = `Net: ₹ ${(data.sales_net / 10000000).toFixed(2)} Cr`;
+
+            document.getElementById('kpiDashPurch').innerText = data.purchase_gross_formatted || '₹ 0.00';
+            document.getElementById('kpiDashPurchNet').innerText = `Net: ₹ ${(data.purchase_net / 10000000).toFixed(2)} Cr`;
+
+            document.getElementById('kpiDashMargin').innerText = data.gross_margin_formatted || '₹ 0.00';
+            document.getElementById('kpiDashMarginPct').innerText = `Margin: ${data.gross_margin_pct}%`;
+
+            document.getElementById('kpiDashDebit').innerText = data.debit_notes_formatted || '₹ 0.00';
+            document.getElementById('kpiDashDebitCount').innerText = `${data.debit_notes_count.toLocaleString()} vouchers`;
+
+            document.getElementById('kpiDashCredit').innerText = data.credit_notes_formatted || '₹ 0.00';
+            document.getElementById('kpiDashCreditCount').innerText = `${data.credit_notes_count.toLocaleString()} vouchers`;
+
+            document.getElementById('kpiDashVouchers').innerText = (data.total_vouchers || 0).toLocaleString();
+            document.getElementById('kpiDashParties').innerText = `${data.unique_parties.toLocaleString()} Parties | ${data.unique_cost_centres} CCs`;
+        })
+        .catch(err => console.error('Failed to load dashboard summary:', err));
+}
+
+function loadMonthlyTrend() {
+    fetch('/api/dashboard/monthly-trend')
+        .then(res => res.json())
+        .then(data => {
+            renderMonthlyTrendChart(data);
+        })
+        .catch(err => console.error('Failed to load monthly trend:', err));
+}
+
+function renderMonthlyTrendChart(data) {
+    const ctx = document.getElementById('monthlyTrendChart');
+    if (!ctx) return;
+
+    if (trendChartInstance) {
+        trendChartInstance.destroy();
+    }
+
+    // Convert values to Crores for clean presentation
+    const salesInCr = data.sales.map(v => Number((v / 10000000).toFixed(2)));
+    const purchInCr = data.purchases.map(v => Number((v / 10000000).toFixed(2)));
+    const marginsInCr = data.margins.map(v => Number((v / 10000000).toFixed(2)));
+
+    trendChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [
+                {
+                    label: 'Gross Sales (₹ Cr)',
+                    data: salesInCr,
+                    backgroundColor: 'rgba(39, 174, 96, 0.85)',
+                    borderRadius: 4,
+                    order: 2
+                },
+                {
+                    label: 'Direct Purchases (₹ Cr)',
+                    data: purchInCr,
+                    backgroundColor: 'rgba(230, 126, 34, 0.85)',
+                    borderRadius: 4,
+                    order: 3
+                },
+                {
+                    type: 'line',
+                    label: 'Gross Margin (₹ Cr)',
+                    data: marginsInCr,
+                    borderColor: '#16A085',
+                    backgroundColor: '#16A085',
+                    borderWidth: 2.5,
+                    fill: false,
+                    tension: 0.2,
+                    order: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.dataset.label}: ₹ ${context.parsed.y.toLocaleString()} Cr`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { size: 10 } }
+                },
+                y: {
+                    grid: { color: '#F0F2F5' },
+                    ticks: {
+                        callback: function(val) { return `₹ ${val} Cr`; },
+                        font: { size: 10 }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function loadRankings() {
+    fetch('/api/dashboard/rankings?top_n=10')
+        .then(res => res.json())
+        .then(data => {
+            renderDebtorsChart(data.top_debtors);
+            renderCreditorsChart(data.top_creditors);
+            renderCostCentresTable(data.top_cost_centres);
+        })
+        .catch(err => console.error('Failed to load rankings:', err));
+}
+
+function renderDebtorsChart(debtors) {
+    const ctx = document.getElementById('topDebtorsChart');
+    if (!ctx) return;
+    if (debtorsChartInstance) debtorsChartInstance.destroy();
+
+    const labels = debtors.map(d => d.party_name.length > 22 ? d.party_name.substring(0, 20) + '...' : d.party_name);
+    const fullNames = debtors.map(d => d.party_name);
+    const valuesInCr = debtors.map(d => Number((d.amount / 10000000).toFixed(2)));
+
+    debtorsChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: valuesInCr,
+                backgroundColor: 'rgba(41, 128, 185, 0.85)',
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => fullNames[items[0].dataIndex],
+                        label: (item) => `Total Billed: ₹ ${item.parsed.x} Cr`
+                    }
+                }
+            },
+            onClick: (e, elements) => {
+                if (elements.length > 0) {
+                    const idx = elements[0].index;
+                    askCopilotAboutParty(fullNames[idx]);
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        callback: val => `₹ ${val} Cr`,
+                        font: { size: 9.5 }
+                    }
+                },
+                y: { ticks: { font: { size: 10 } } }
+            }
+        }
+    });
+}
+
+function renderCreditorsChart(creditors) {
+    const ctx = document.getElementById('topCreditorsChart');
+    if (!ctx) return;
+    if (creditorsChartInstance) creditorsChartInstance.destroy();
+
+    const labels = creditors.map(c => c.party_name.length > 22 ? c.party_name.substring(0, 20) + '...' : c.party_name);
+    const fullNames = creditors.map(c => c.party_name);
+    const valuesInCr = creditors.map(c => Number((c.amount / 10000000).toFixed(2)));
+
+    creditorsChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: valuesInCr,
+                backgroundColor: 'rgba(230, 126, 34, 0.85)',
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => fullNames[items[0].dataIndex],
+                        label: (item) => `Total Outflow: ₹ ${item.parsed.x} Cr`
+                    }
+                }
+            },
+            onClick: (e, elements) => {
+                if (elements.length > 0) {
+                    const idx = elements[0].index;
+                    askCopilotAboutParty(fullNames[idx]);
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        callback: val => `₹ ${val} Cr`,
+                        font: { size: 9.5 }
+                    }
+                },
+                y: { ticks: { font: { size: 10 } } }
+            }
+        }
+    });
+}
+
+function renderCostCentresTable(ccs) {
+    const tbody = document.getElementById('costCentresTableBody');
+    if (!tbody) return;
+
+    if (!ccs || ccs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:15px;">No cost centre data available.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = ccs.map(cc => `
+        <tr>
+            <td><strong>${escapeHtml(cc.cost_centre)}</strong></td>
+            <td class="num-cell">${cc.sales_formatted}</td>
+            <td class="num-cell" style="color:var(--orange);">${cc.purchase_formatted}</td>
+            <td class="num-cell" style="color:${cc.margin >= 0 ? 'var(--green)' : 'red'};">${cc.margin_formatted}</td>
+            <td class="num-cell"><strong>${cc.margin_pct}%</strong></td>
+            <td style="text-align:center;">
+                <button class="btn-table-action" onclick="askCopilotAboutProject('${escapeForJs(cc.cost_centre)}')">🔍 Ask Copilot</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// ==================== VOUCHER EXPLORER GRID ====================
+function loadVouchersGrid(page = 1) {
+    currentGridPage = page;
+    const vtype = document.getElementById('gridFilterType').value;
+    const fy = document.getElementById('gridFilterFY').value;
+    const search = document.getElementById('gridSearchInput').value.trim();
+
+    const tbody = document.getElementById('vouchersGridBody');
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 20px;">Fetching records...</td></tr>';
+
+    const url = `/api/dashboard/vouchers-grid?page=${page}&page_size=50&type=${encodeURIComponent(vtype)}&fy=${encodeURIComponent(fy)}&search=${encodeURIComponent(search)}`;
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            currentGridTotalPages = data.total_pages || 1;
+            renderVouchersGrid(data.items, data.total_rows);
+            updateGridPagination(data.page, data.total_pages, data.total_rows);
+        })
+        .catch(err => {
+            tbody.innerHTML = `<tr><td colspan="8" style="color:red; text-align:center;">Failed to load vouchers: ${err.message}</td></tr>`;
+        });
+}
+
+function renderVouchersGrid(items, totalRows) {
+    const tbody = document.getElementById('vouchersGridBody');
+    if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 20px;">No matching vouchers found.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = items.map(r => `
+        <tr>
+            <td style="white-space:nowrap;">${r.date}</td>
+            <td><span class="badge-${(r.voucher_type || '').toLowerCase().replace(/\s+/g, '-')}">${r.voucher_type}</span></td>
+            <td>${escapeHtml(r.voucher_no)}</td>
+            <td>${escapeHtml(r.reference_no)}</td>
+            <td><strong>${escapeHtml(r.party_name)}</strong></td>
+            <td><small>${escapeHtml(r.cost_centre)}</small></td>
+            <td class="num-cell">₹ ${Number(r.gross_amount).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color:#555;" title="${escapeHtml(r.narration)}">${escapeHtml(r.narration || '-')}</td>
+        </tr>
+    `).join('');
+}
+
+function updateGridPagination(page, totalPages, totalRows) {
+    document.getElementById('gridPageInfo').innerText = `Showing Page ${page} of ${totalPages} (${totalRows.toLocaleString()} Total Records)`;
+    document.getElementById('gridPrevBtn').disabled = page <= 1;
+    document.getElementById('gridNextBtn').disabled = page >= totalPages;
+}
+
+function changeGridPage(delta) {
+    const targetPage = currentGridPage + delta;
+    if (targetPage >= 1 && targetPage <= currentGridTotalPages) {
+        loadVouchersGrid(targetPage);
+    }
+}
+
+function debounceGridSearch() {
+    clearTimeout(gridSearchTimer);
+    gridSearchTimer = setTimeout(() => {
+        loadVouchersGrid(1);
+    }, 350);
+}
+
+function exportVouchersGrid() {
+    const vtype = document.getElementById('gridFilterType').value;
+    const fy = document.getElementById('gridFilterFY').value;
+    const search = document.getElementById('gridSearchInput').value.trim();
+
+    // Fetch full matching set up to 5,000 records for immediate CSV export
+    const url = `/api/dashboard/vouchers-grid?page=1&page_size=5000&type=${encodeURIComponent(vtype)}&fy=${encodeURIComponent(fy)}&search=${encodeURIComponent(search)}`;
+    
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            if (!data.items || data.items.length === 0) {
+                alert('No data to export.');
+                return;
+            }
+
+            fetch('/api/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    data: data.items,
+                    columns: ['date', 'voucher_type', 'voucher_no', 'reference_no', 'party_name', 'cost_centre', 'net_amount', 'tax_amount', 'gross_amount', 'narration'],
+                    filename: `LedgerGPT_Voucher_Export_${Date.now()}.csv`
+                })
+            })
+            .then(res => res.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `LedgerGPT_Voucher_Export_${Date.now()}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            });
+        });
+}
+
+// ==================== BIDIRECTIONAL COPILOT BINDING ====================
+function askCopilotAboutParty(partyName) {
+    // If in dashboard view, switch to split so user sees copilot answer
+    if (document.body.classList.contains('view-dashboard')) {
+        setViewMode('split');
+    }
+
+    const query = `Analyze all vouchers, gross volume, and transaction history for ${partyName}`;
+    document.getElementById('userInput').value = query;
+    handleChatSubmit(new Event('submit'));
+}
+
+function askCopilotAboutProject(projectName) {
+    if (document.body.classList.contains('view-dashboard')) {
+        setViewMode('split');
+    }
+
+    const query = `Analyze revenue, direct subcontract expenses, and profit margin for project ${projectName}`;
+    document.getElementById('userInput').value = query;
+    handleChatSubmit(new Event('submit'));
+}
+
+// ==================== CONVERSATIONAL CHAT COPILOT ====================
 function handleChatSubmit(e) {
     e.preventDefault();
     const input = document.getElementById('userInput');
@@ -11,7 +418,7 @@ function handleChatSubmit(e) {
     appendUserMessage(q);
     input.value = '';
     input.disabled = true;
-    document.getElementById('sendBtn').innerText = 'Computing...';
+    document.getElementById('sendBtn').innerText = 'Thinking...';
 
     // Call API
     fetch('/api/chat', {
@@ -32,7 +439,7 @@ function handleChatSubmit(e) {
     })
     .finally(() => {
         input.disabled = false;
-        document.getElementById('sendBtn').innerText = 'Ask LedgerGPT ↵';
+        document.getElementById('sendBtn').innerText = 'Ask Copilot ↵';
         input.focus();
     });
 }
@@ -68,8 +475,8 @@ function appendAssistantMessage(data) {
     if (data.data && data.data.length > 0) {
         currentQueryData = data;
         exportBtnHtml = `
-            <div style="margin-top: 12px; display: flex; gap: 10px;">
-                <button class="btn btn-outline" style="background: #27AE60; color:#fff;" onclick="downloadCurrentData()">📥 Export Result (${data.row_count} Rows) as CSV</button>
+            <div style="margin-top: 10px; display: flex; gap: 8px;">
+                <button class="btn btn-outline" style="background: #27AE60; color:#fff; font-size:11px; padding: 4px 10px;" onclick="downloadCurrentData()">📥 Export Result (${data.row_count} Rows) as CSV</button>
             </div>
         `;
 
@@ -78,9 +485,8 @@ function appendAssistantMessage(data) {
         let trs = data.data.slice(0, 50).map(r => {
             let tds = cols.map(c => {
                 let val = r[c] !== null && r[c] !== undefined ? r[c] : '';
-                let isNum = typeof val === 'number' || (!isNaN(parseFloat(val)) && (c.includes('amount') || c.includes('gross') || c.includes('net') || c.includes('tax') || c.includes('balance') || c.includes('billed') || c.includes('expense') || c.includes('sales')));
-                if (isNum && typeof val === 'number') {
-                    return `<td class="num-cell">₹ ${val.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
+                if (typeof val === 'number') {
+                    return `<td class="num-cell">${val.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>`;
                 }
                 return `<td>${escapeHtml(String(val))}</td>`;
             }).join('');
@@ -88,13 +494,13 @@ function appendAssistantMessage(data) {
         }).join('');
 
         tableHtml = `
-            <div class="table-container">
+            <div class="table-container" style="max-height: 250px; margin-top: 10px;">
                 <table class="data-table">
                     <thead><tr>${ths}</tr></thead>
                     <tbody>${trs}</tbody>
                 </table>
             </div>
-            ${data.data.length > 50 ? `<small style="color:#6c757d; display:block; margin-top:4px;">Showing top 50 preview rows of ${data.row_count} total records. Click export to download all.</small>` : ''}
+            ${exportBtnHtml}
         `;
     }
 
@@ -103,10 +509,10 @@ function appendAssistantMessage(data) {
         auditHtml = `
             <details class="audit-details">
                 <summary class="audit-summary">
-                    <span>🔍 Verified SQL & Audit Trail</span>
-                    <span style="font-size: 11px; color: #6c757d;">${data.execution_time_ms || 5} ms | ${data.source || 'Deterministic'}</span>
+                    <span>🔍 View Deterministic SQL & Audit Execution</span>
+                    <span>${data.execution_time_ms || 0} ms</span>
                 </summary>
-                <div class="audit-code">${escapeHtml(data.sql)}</div>
+                <pre class="audit-code"><code>${escapeHtml(data.sql)}</code></pre>
             </details>
         `;
     }
@@ -116,11 +522,10 @@ function appendAssistantMessage(data) {
         <div class="msg-body">
             <div class="msg-header">
                 <strong>LedgerGPT Response</strong>
-                <span class="msg-tag">${data.source ? data.source.split(' ')[0] : 'Verified'}</span>
+                <span class="msg-tag">${data.source || 'Deterministic'}</span>
             </div>
             <div>${formattedAnswer}</div>
             ${tableHtml}
-            ${exportBtnHtml}
             ${auditHtml}
         </div>
     `;
@@ -131,13 +536,14 @@ function appendAssistantMessage(data) {
 
 function downloadCurrentData() {
     if (!currentQueryData || !currentQueryData.data) return;
+
     fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             data: currentQueryData.data,
             columns: currentQueryData.columns,
-            filename: `LedgerGPT_Export_${Date.now()}.csv`
+            filename: `LedgerGPT_QueryResult_${Date.now()}.csv`
         })
     })
     .then(res => res.blob())
@@ -145,21 +551,14 @@ function downloadCurrentData() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `LedgerGPT_Export_${Date.now()}.csv`;
+        a.download = `LedgerGPT_QueryResult_${Date.now()}.csv`;
         document.body.appendChild(a);
         a.click();
         a.remove();
     });
 }
 
-function openForensicModal() {
-    document.getElementById('forensicModal').style.display = 'flex';
-}
-
-function closeForensicModal() {
-    document.getElementById('forensicModal').style.display = 'none';
-}
-
+// ==================== TALLY SYNC ENGINE ====================
 function openSyncModal() {
     document.getElementById('syncModal').style.display = 'flex';
     const msg = document.getElementById('syncStatusMsg');
@@ -203,19 +602,12 @@ function executeTallySync() {
         msg.style.border = '1px solid #A9DFBF';
         msg.innerHTML = `✅ <strong>${escapeHtml(data.message)}</strong>`;
 
-        // Update top KPI cards live
-        if (data.kpis) {
-            const k = data.kpis;
-            if (document.getElementById('kpiVouchers')) document.getElementById('kpiVouchers').innerText = (k.total_vouchers || 0).toLocaleString();
-            if (document.getElementById('kpiSales')) document.getElementById('kpiSales').innerText = k.sales_formatted || '₹ 0.00';
-            if (document.getElementById('kpiPurch')) document.getElementById('kpiPurch').innerText = k.purchase_formatted || '₹ 0.00';
-            if (document.getElementById('kpiDebit')) document.getElementById('kpiDebit').innerText = k.debit_formatted || '₹ 0.00';
-            if (document.getElementById('kpiCredit')) document.getElementById('kpiCredit').innerText = k.credit_formatted || '₹ 0.00';
-        }
+        // Refresh entire dashboard with new company data!
+        initDashboard();
 
         // Add notice to chat stream
         appendAssistantMessage({
-            answer: `🎉 **Tally Sync Complete!** Successfully synced **${data.vouchers_synced.toLocaleString()} vouchers** from active company: **${escapeHtml(data.company_name)}**.\n- Total Active Vouchers: **${(data.kpis.total_vouchers || 0).toLocaleString()}**\n- Gross Sales: **${data.kpis.sales_formatted}**\n- Gross Purchases: **${data.kpis.purchase_formatted}**\n\nYou can now ask questions about ${escapeHtml(data.company_name)}!`,
+            answer: `🎉 **Tally Sync Complete!** Successfully synced **${data.vouchers_synced.toLocaleString()} vouchers** from active company: **${escapeHtml(data.company_name)}**.\n- Total Active Vouchers: **${(data.kpis.total_vouchers || 0).toLocaleString()}**\n- Gross Sales: **${data.kpis.sales_formatted}**\n- Gross Purchases: **${data.kpis.purchase_formatted}**\n\nAll dashboard charts and reports have been updated for ${escapeHtml(data.company_name)}!`,
             data: [],
             sql: ''
         });
@@ -234,6 +626,15 @@ function executeTallySync() {
         btn.disabled = false;
         btn.innerText = 'Start Live Sync';
     });
+}
+
+// ==================== FORENSIC AUDIT SCANNER ====================
+function openForensicModal() {
+    document.getElementById('forensicModal').style.display = 'flex';
+}
+
+function closeForensicModal() {
+    document.getElementById('forensicModal').style.display = 'none';
 }
 
 function loadForensicScan() {
@@ -327,9 +728,15 @@ function renderForensicResults(data) {
     `;
 }
 
+// ==================== UTILITY HELPERS ====================
 function escapeHtml(text) {
     if (!text) return '';
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escapeForJs(text) {
+    if (!text) return '';
+    return String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 function formatHeader(str) {
@@ -338,9 +745,7 @@ function formatHeader(str) {
 
 function formatMarkdownText(text) {
     let html = escapeHtml(text);
-    // Bold **text**
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // Bullet points
     html = html.replace(/\n- (.*?)/g, '<br>• $1');
     html = html.replace(/\n/g, '<br>');
     return html;

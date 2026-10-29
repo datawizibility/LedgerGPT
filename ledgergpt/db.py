@@ -106,9 +106,19 @@ class FinancialDB:
             conn.close()
 
     def insert_vouchers_batch(self, vouchers_list):
-        """High-speed batch insertion of vouchers."""
+        """High-speed batch insertion of vouchers with defensive key normalization."""
         if not vouchers_list:
             return 0
+
+        defaults = {
+            "guid": None, "voucher_type": "Voucher", "voucher_no": "", "reference_no": "",
+            "date": "", "financial_year": "", "month_year": "", "quarter": "",
+            "party_name": "Sundry Party", "primary_ledger": "General Ledger",
+            "cost_centre": "General / Untagged", "net_amount": 0.0, "tax_amount": 0.0,
+            "gross_amount": 0.0, "narration": "", "day_of_week": "", "is_weekend": 0, "is_round_sum": 0
+        }
+        sanitized = [{**defaults, **v} for v in vouchers_list]
+
         conn = self.get_connection()
         cursor = conn.cursor()
         sql = """
@@ -124,13 +134,13 @@ class FinancialDB:
             :gross_amount, :narration, :day_of_week, :is_weekend, :is_round_sum
         )
         """
-        cursor.executemany(sql, vouchers_list)
+        cursor.executemany(sql, sanitized)
         conn.commit()
         if not self._shared_conn:
             conn.close()
             
         self.rebuild_fts()
-        return len(vouchers_list)
+        return len(sanitized)
 
     def execute_query(self, sql, params=()):
         """Execute a read-only SQL query and return rows as dicts."""
