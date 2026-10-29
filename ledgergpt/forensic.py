@@ -153,6 +153,81 @@ class ForensicScanner:
             "digits": distribution
         }
 
+    def detect_section_269ss_269t_violations(self, threshold=20000, limit=50):
+        """
+        Flags potential Section 269SS and 269T (Tax Audit Form 3CD Clause 31) violations:
+        - Section 269SS: Acceptance of loans, deposits, or advances in cash >= Rs 20,000.
+        - Section 269T: Repayment of loans, deposits, or advances in cash >= Rs 20,000.
+        """
+        sql = """
+        SELECT id, date, voucher_type, voucher_no, reference_no, party_name,
+               primary_ledger, gross_amount, narration,
+               CASE 
+                   WHEN LOWER(voucher_type) IN ('receipt', 'journal') THEN 'Section 269SS (Loan/Deposit Taken in Cash >= Rs 20k)'
+                   ELSE 'Section 269T (Loan/Deposit Repaid in Cash >= Rs 20k)'
+               END as clause_violation
+        FROM vouchers
+        WHERE gross_amount >= ?
+          AND (
+              LOWER(party_name) LIKE '%cash%' OR LOWER(primary_ledger) LIKE '%cash%'
+          )
+          AND (
+              LOWER(party_name) LIKE '%loan%' OR LOWER(primary_ledger) LIKE '%loan%'
+              OR LOWER(party_name) LIKE '%deposit%' OR LOWER(primary_ledger) LIKE '%deposit%'
+              OR LOWER(party_name) LIKE '%borrowing%' OR LOWER(primary_ledger) LIKE '%borrowing%'
+              OR LOWER(party_name) LIKE '%advance%' OR LOWER(primary_ledger) LIKE '%advance%'
+              OR LOWER(party_name) LIKE '%director%' OR LOWER(primary_ledger) LIKE '%director%'
+              OR LOWER(party_name) LIKE '%partner%' OR LOWER(primary_ledger) LIKE '%partner%'
+          )
+        ORDER BY gross_amount DESC
+        LIMIT ?
+        """
+        rows = self.db.execute_query(sql, (threshold, limit))
+        return {
+            "scanner": "Section 269SS / 269T Statutory Scanner",
+            "criteria": f"Cash transactions >= {format_inr(threshold)} relating to Loans, Deposits, or Advances",
+            "total_flagged": len(rows),
+            "records": rows
+        }
+
+    def detect_negative_cash_balances(self, limit=50):
+        """
+        Detects negative cash balance days (Form 3CD requirement & CA audit test).
+        Physical cash balance cannot be negative; indicates unrecorded receipts or backdated entries.
+        """
+        sql = """
+        SELECT date,
+               SUM(CASE WHEN LOWER(voucher_type) = 'receipt' THEN gross_amount ELSE 0 END) as daily_inflow,
+               SUM(CASE WHEN LOWER(voucher_type) = 'payment' THEN gross_amount ELSE 0 END) as daily_outflow
+        FROM vouchers
+        WHERE LOWER(party_name) LIKE '%cash%' OR LOWER(primary_ledger) LIKE '%cash%'
+        GROUP BY date
+        ORDER BY date ASC
+        """
+        rows = self.db.execute_query(sql)
+        running_cash = 0.0
+        flagged_days = []
+        for r in rows:
+            inflow = r["daily_inflow"] or 0.0
+            outflow = r["daily_outflow"] or 0.0
+            running_cash += (inflow - outflow)
+            if running_cash < -0.01:
+                flagged_days.append({
+                    "date": r["date"],
+                    "daily_inflow": inflow,
+                    "daily_outflow": outflow,
+                    "closing_cash_balance": round(running_cash, 2),
+                    "negative_deficit": round(abs(running_cash), 2),
+                    "status": "NEGATIVE CASH"
+                })
+
+        return {
+            "scanner": "Negative Cash Balance Detector",
+            "criteria": "Cumulative physical cash balance dropping below Rs 0.00",
+            "total_flagged": len(flagged_days),
+            "records": flagged_days[:limit]
+        }
+
     def run_full_forensic_suite(self):
         """Runs the complete suite and aggregates findings into an executive report."""
         suspicious = self.scan_suspicious_narrations(limit=25)
@@ -160,6 +235,8 @@ class ForensicScanner:
         weekends = self.detect_weekend_entries(limit=25)
         duplicates = self.detect_duplicate_bills(limit=25)
         benford = self.analyze_benford_law()
+        sec269 = self.detect_section_269ss_269t_violations(limit=25)
+        neg_cash = self.detect_negative_cash_balances(limit=25)
 
         return {
             "summary": {
@@ -168,10 +245,14 @@ class ForensicScanner:
                 "weekend_vouchers_count": weekends["total_flagged"],
                 "duplicate_bill_groups": duplicates["total_flagged"],
                 "benford_conformity": benford.get("overall_conformity", "N/A"),
+                "section_269ss_violations_count": sec269["total_flagged"],
+                "negative_cash_days_count": neg_cash["total_flagged"],
             },
             "suspicious_narrations": suspicious,
             "round_sum_transactions": round_sums,
             "weekend_entries": weekends,
             "duplicate_bills": duplicates,
             "benford_analysis": benford,
+            "section_269ss": sec269,
+            "negative_cash": neg_cash,
         }

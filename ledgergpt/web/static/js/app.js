@@ -8,6 +8,7 @@ let currentGridTotalPages = 1;
 let gridSearchTimer = null;
 let currentQueryData = null;
 let activeFinancialYear = 'All';
+let activeCostCentre = 'All';
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -16,14 +17,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initDashboard() {
     loadAvailablePeriods();
+    loadAvailableCostCentres();
     refreshDashboardViews();
     loadVouchersGrid(1);
 }
 
 function refreshDashboardViews() {
-    loadDashboardSummary(activeFinancialYear);
-    loadMonthlyTrend(activeFinancialYear);
-    loadRankings(activeFinancialYear);
+    loadDashboardSummary(activeFinancialYear, activeCostCentre);
+    loadMonthlyTrend(activeFinancialYear, activeCostCentre);
+    loadRankings(activeFinancialYear, activeCostCentre);
+    loadAgingSummary(activeFinancialYear, activeCostCentre);
 }
 
 function loadAvailablePeriods() {
@@ -50,9 +53,27 @@ function loadAvailablePeriods() {
         .catch(err => console.error('Failed to load periods:', err));
 }
 
-function applyGlobalPeriod() {
-    const sel = document.getElementById('globalPeriodSelect');
-    activeFinancialYear = sel ? sel.value : 'All';
+function loadAvailableCostCentres() {
+    fetch('/api/dashboard/cost-centres')
+        .then(res => res.json())
+        .then(ccs => {
+            const ccSelect = document.getElementById('globalCostCentreSelect');
+            if (!ccSelect) return;
+            let optHtml = '<option value="All">All Sites / Cost Centres</option>';
+            if (ccs && ccs.length > 0) {
+                optHtml += ccs.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+            }
+            ccSelect.innerHTML = optHtml;
+            ccSelect.value = activeCostCentre;
+        })
+        .catch(err => console.error('Failed to load cost centres:', err));
+}
+
+function applyGlobalFilters() {
+    const selPeriod = document.getElementById('globalPeriodSelect');
+    const selCC = document.getElementById('globalCostCentreSelect');
+    activeFinancialYear = selPeriod ? selPeriod.value : 'All';
+    activeCostCentre = selCC ? selCC.value : 'All';
 
     // Sync grid filter FY
     const gridSel = document.getElementById('gridFilterFY');
@@ -60,6 +81,10 @@ function applyGlobalPeriod() {
 
     refreshDashboardViews();
     loadVouchersGrid(1);
+}
+
+function applyGlobalPeriod() {
+    applyGlobalFilters();
 }
 
 // ==================== VIEW MODE SWITCHER ====================
@@ -79,8 +104,8 @@ function setViewMode(mode) {
 }
 
 // ==================== EXECUTIVE DASHBOARD DATA ====================
-function loadDashboardSummary(fy = 'All') {
-    const url = `/api/dashboard/summary?fy=${encodeURIComponent(fy)}`;
+function loadDashboardSummary(fy = 'All', cc = 'All') {
+    const url = `/api/dashboard/summary?fy=${encodeURIComponent(fy)}&cost_centre=${encodeURIComponent(cc)}`;
     fetch(url)
         .then(res => res.json())
         .then(data => {
@@ -151,8 +176,42 @@ function loadDashboardSummary(fy = 'All') {
         .catch(err => console.error('Failed to load dashboard summary:', err));
 }
 
-function loadMonthlyTrend(fy = 'All') {
-    const url = `/api/dashboard/monthly-trend?fy=${encodeURIComponent(fy)}`;
+function loadAgingSummary(fy = 'All', cc = 'All') {
+    const url = `/api/dashboard/aging?fy=${encodeURIComponent(fy)}&cost_centre=${encodeURIComponent(cc)}`;
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            const s = data.summary;
+            if (!s) return;
+            // Receivables
+            const r030 = document.getElementById('agingRec030');
+            if (r030) r030.innerText = s.receivables.bucket_0_30_formatted || '₹ 0.00';
+            const r3160 = document.getElementById('agingRec3160');
+            if (r3160) r3160.innerText = s.receivables.bucket_31_60_formatted || '₹ 0.00';
+            const r6190 = document.getElementById('agingRec6190');
+            if (r6190) r6190.innerText = s.receivables.bucket_61_90_formatted || '₹ 0.00';
+            const r90p = document.getElementById('agingRec90Plus');
+            if (r90p) r90p.innerText = s.receivables.bucket_90_plus_formatted || '₹ 0.00';
+            const rtot = document.getElementById('agingRecTotal');
+            if (rtot) rtot.innerText = `${s.receivables.total_formatted} (${s.receivables.count} bills)`;
+
+            // Payables
+            const p030 = document.getElementById('agingPay030');
+            if (p030) p030.innerText = s.payables.bucket_0_30_formatted || '₹ 0.00';
+            const p3160 = document.getElementById('agingPay3160');
+            if (p3160) p3160.innerText = s.payables.bucket_31_60_formatted || '₹ 0.00';
+            const p6190 = document.getElementById('agingPay6190');
+            if (p6190) p6190.innerText = s.payables.bucket_61_90_formatted || '₹ 0.00';
+            const p90p = document.getElementById('agingPay90Plus');
+            if (p90p) p90p.innerText = s.payables.bucket_90_plus_formatted || '₹ 0.00';
+            const ptot = document.getElementById('agingPayTotal');
+            if (ptot) ptot.innerText = `${s.payables.total_formatted} (${s.payables.count} bills)`;
+        })
+        .catch(err => console.error('Failed to load aging summary:', err));
+}
+
+function loadMonthlyTrend(fy = 'All', cc = 'All') {
+    const url = `/api/dashboard/monthly-trend?fy=${encodeURIComponent(fy)}&cost_centre=${encodeURIComponent(cc)}`;
     fetch(url)
         .then(res => res.json())
         .then(data => {
@@ -235,8 +294,8 @@ function renderMonthlyTrendChart(data) {
     });
 }
 
-function loadRankings(fy = 'All') {
-    const url = `/api/dashboard/rankings?top_n=10&fy=${encodeURIComponent(fy)}`;
+function loadRankings(fy = 'All', cc = 'All') {
+    const url = `/api/dashboard/rankings?top_n=10&fy=${encodeURIComponent(fy)}&cost_centre=${encodeURIComponent(cc)}`;
     fetch(url)
         .then(res => res.json())
         .then(data => {
@@ -382,7 +441,7 @@ function loadVouchersGrid(page = 1) {
     const tbody = document.getElementById('vouchersGridBody');
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 20px;">Fetching records...</td></tr>';
 
-    const url = `/api/dashboard/vouchers-grid?page=${page}&page_size=50&type=${encodeURIComponent(vtype)}&fy=${encodeURIComponent(fy)}&search=${encodeURIComponent(search)}`;
+    const url = `/api/dashboard/vouchers-grid?page=${page}&page_size=50&type=${encodeURIComponent(vtype)}&fy=${encodeURIComponent(fy)}&cost_centre=${encodeURIComponent(activeCostCentre)}&search=${encodeURIComponent(search)}`;
 
     fetch(url)
         .then(res => res.json())
@@ -774,7 +833,7 @@ function loadForensicScan() {
 
 function renderForensicResults(data) {
     const body = document.getElementById('forensicModalBody');
-    const s = data.summary;
+    const s = data.summary || {};
 
     // 1. BENFORD'S LAW TABLE
     let benfordHtml = '';
@@ -915,23 +974,89 @@ function renderForensicResults(data) {
         `;
     }
 
+    // 6. SECTION 269SS / 269T CASH VIOLATIONS (CA RAMAJAYAM TAX AUDIT RULE)
+    let sec269Html = '';
+    if (data.section_269ss && data.section_269ss.records) {
+        let rows = data.section_269ss.records.slice(0, 50).map(r => `
+            <tr>
+                <td>${r.date}</td>
+                <td>${r.voucher_type}</td>
+                <td><strong>${escapeHtml(r.party_name)}</strong></td>
+                <td>${escapeHtml(r.primary_ledger)}</td>
+                <td class="num-cell" style="color:red; font-weight:700;">₹ ${Number(r.gross_amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+                <td><span class="badge-pro" style="background:#FADBD8; color:#78281F;">${escapeHtml(r.clause_violation)}</span></td>
+                <td style="font-size:11px; color:#555;">${escapeHtml(r.narration || '-')}</td>
+            </tr>
+        `).join('');
+
+        sec269Html = `
+            <div style="margin-top: 24px;">
+                <h4 style="color:#C0392B;">6. Section 269SS & 269T Cash Loan Violations (${data.section_269ss.total_flagged} Flagged)</h4>
+                <p style="font-size:12px; color:#555;">Form 3CD Clause 31 audit check: Cash loans, deposits, or advances ≥ ₹20,000 attracting 100% penalty under Sec 271D/271E.</p>
+                <div class="table-container" style="max-height:220px; margin-top:8px;">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Type</th><th>Party</th><th>Ledger</th><th class="num-cell">Amount</th><th>Clause</th><th>Narration</th></tr></thead>
+                        <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:green; padding:12px;">✅ Clean: Zero cash loan violations ≥ ₹20,000 detected.</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    // 7. NEGATIVE CASH BALANCE AUDIT ALERT
+    let negCashHtml = '';
+    if (data.negative_cash && data.negative_cash.records) {
+        let rows = data.negative_cash.records.slice(0, 50).map(r => `
+            <tr>
+                <td><strong>${r.date}</strong></td>
+                <td class="num-cell">₹ ${Number(r.daily_inflow).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+                <td class="num-cell">₹ ${Number(r.daily_outflow).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+                <td class="num-cell" style="color:red; font-weight:700;">₹ ${Number(r.closing_cash_balance).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+                <td style="text-align:center;"><span class="badge-pro" style="background:#F2D7D5; color:#922B21;">NEGATIVE CASH</span></td>
+            </tr>
+        `).join('');
+
+        negCashHtml = `
+            <div style="margin-top: 24px;">
+                <h4 style="color:#922B21;">7. Negative Cash Balance Audit Alert (${data.negative_cash.total_flagged} Flagged Dates)</h4>
+                <p style="font-size:12px; color:#555;">Form 3CD audit test: Days where physical cumulative cash-in-hand dropped below ₹0.00.</p>
+                <div class="table-container" style="max-height:220px; margin-top:8px;">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th class="num-cell">Daily Receipts</th><th class="num-cell">Daily Payments</th><th class="num-cell">Closing Balance</th><th style="text-align:center;">Audit Alert</th></tr></thead>
+                        <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:green; padding:12px;">✅ Clean: Zero negative cash balance days detected.</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
     body.innerHTML = `
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px;">
             <div style="background:#FDEDEC; padding:12px; border-radius:6px; border:1px solid #F5B7B1;">
                 <div style="font-size:11px; color:#78281F; font-weight:600;">SUSPICIOUS NARRATIONS</div>
-                <div style="font-size:20px; font-weight:700; color:#922B21;">${s.suspicious_narrations_count}</div>
+                <div style="font-size:20px; font-weight:700; color:#922B21;">${s.suspicious_narrations_count || 0}</div>
             </div>
             <div style="background:#FEF9E7; padding:12px; border-radius:6px; border:1px solid #F9E79F;">
                 <div style="font-size:11px; color:#7D6608; font-weight:600;">ROUND-SUM PAYMENTS (≥₹1L)</div>
-                <div style="font-size:20px; font-weight:700; color:#B7950B;">${s.round_sum_vouchers_count}</div>
+                <div style="font-size:20px; font-weight:700; color:#B7950B;">${s.round_sum_vouchers_count || 0}</div>
             </div>
             <div style="background:#EBF5FB; padding:12px; border-radius:6px; border:1px solid #AED6F1;">
-                <div style="font-size:11px; color:#1B4F72; font-weight:600;">WEEKEND DATED VOUCHERS</div>
-                <div style="font-size:20px; font-weight:700; color:#2874A6;">${s.weekend_vouchers_count}</div>
+                <div style="font-size:11px; color:#1B4F72; font-weight:600;">WEEKEND VOUCHERS</div>
+                <div style="font-size:20px; font-weight:700; color:#2874A6;">${s.weekend_vouchers_count || 0}</div>
             </div>
             <div style="background:#EAFAF1; padding:12px; border-radius:6px; border:1px solid #A9DFBF;">
                 <div style="font-size:11px; color:#145A32; font-weight:600;">DUPLICATE BILL GROUPS</div>
-                <div style="font-size:20px; font-weight:700; color:#1E8449;">${s.duplicate_bill_groups}</div>
+                <div style="font-size:20px; font-weight:700; color:#1E8449;">${s.duplicate_bill_groups || 0}</div>
+            </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px;">
+            <div style="background:#FADBD8; padding:12px; border-radius:6px; border:1px solid #E6B0AA;">
+                <div style="font-size:11px; color:#78281F; font-weight:600;">SEC 269SS/269T CASH LOAN VIOLATIONS (≥₹20K)</div>
+                <div style="font-size:20px; font-weight:700; color:#922B21;">${s.section_269ss_violations_count || 0} Flagged</div>
+            </div>
+            <div style="background:#EDBB99; padding:12px; border-radius:6px; border:1px solid #DC7633;">
+                <div style="font-size:11px; color:#6E2C00; font-weight:600;">NEGATIVE CASH BALANCE DAYS</div>
+                <div style="font-size:20px; font-weight:700; color:#A04000;">${s.negative_cash_days_count || 0} Days</div>
             </div>
         </div>
         ${benfordHtml}
@@ -939,6 +1064,8 @@ function renderForensicResults(data) {
         ${roundSumHtml}
         ${weekendHtml}
         ${duplicateHtml}
+        ${sec269Html}
+        ${negCashHtml}
     `;
 }
 
@@ -963,4 +1090,62 @@ function formatMarkdownText(text) {
     html = html.replace(/\n- (.*?)/g, '<br>• $1');
     html = html.replace(/\n/g, '<br>');
     return html;
+}
+
+
+function downloadCfoMisPack() {
+    const url = `/api/dashboard/cfo-mis-pack?fy=${encodeURIComponent(activeFinancialYear)}&cost_centre=${encodeURIComponent(activeCostCentre)}`;
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            let csv = "\ufeff";
+            csv += `=== ${data.report_title} ===\n`;
+            csv += `Generated At,${data.generated_at}\n`;
+            csv += `Company Name,${data.company_name}\n`;
+            csv += `Financial Period,${data.period}\n`;
+            csv += `Cost Centre / Site,${data.cost_centre}\n\n`;
+
+            const es = data.executive_summary;
+            csv += `=== EXECUTIVE FINANCIAL SUMMARY ===\n`;
+            csv += `Metric,Value\n`;
+            csv += `Gross Sales,${es.sales_gross_formatted}\n`;
+            csv += `Gross Purchases,${es.purchase_gross_formatted}\n`;
+            csv += `Gross Operating Margin,${es.gross_margin_formatted} (${es.gross_margin_pct}%)\n`;
+            csv += `Cash Inflow (Receipts),${es.cash_inflow_formatted}\n`;
+            csv += `Cash Outflow (Payments),${es.cash_outflow_formatted}\n`;
+            csv += `Nett Cash Flow,${es.net_cash_flow_formatted}\n`;
+            csv += `Active Bank Balance,${es.bank_balance_formatted} (${es.bank_name})\n`;
+            csv += `Cash-in-Hand Balance,${es.cash_in_hand_formatted}\n`;
+            csv += `Current Assets,${es.current_assets_formatted}\n`;
+            csv += `Current Liabilities,${es.current_liabilities_formatted}\n`;
+            csv += `Current Ratio,${es.current_ratio}x\n`;
+            csv += `Debtor Turnover Days,${es.receivable_turnover_days} Days\n\n`;
+
+            const ag = data.aging_overview;
+            csv += `=== DEBTOR & CREDITOR AGING OVERVIEW ===\n`;
+            csv += `Bucket,Receivables (Debtors),Payables (Creditors)\n`;
+            csv += `0 to 30 Days (Current),${ag.receivables.bucket_0_30_formatted},${ag.payables.bucket_0_30_formatted}\n`;
+            csv += `31 to 60 Days,${ag.receivables.bucket_31_60_formatted},${ag.payables.bucket_31_60_formatted}\n`;
+            csv += `61 to 90 Days,${ag.receivables.bucket_61_90_formatted},${ag.payables.bucket_61_90_formatted}\n`;
+            csv += `Above 90 Days (Critical),${ag.receivables.bucket_90_plus_formatted},${ag.payables.bucket_90_plus_formatted}\n`;
+            csv += `Total Outstanding,${ag.receivables.total_formatted},${ag.payables.total_formatted}\n\n`;
+
+            if (data.critical_overdue_bills && data.critical_overdue_bills.length > 0) {
+                csv += `=== CRITICAL OVERDUE BILLS (>90 DAYS) ===\n`;
+                csv += `Type,Party Name,Bill Ref,Bill Date,Overdue Days,Outstanding Amount,Site\n`;
+                data.critical_overdue_bills.forEach(b => {
+                    csv += `"${b.bill_type}","${b.party_name}","${b.bill_ref}","${b.bill_date}",${b.overdue_days},"${b.outstanding_amount}","${b.cost_centre}"\n`;
+                });
+                csv += `\n`;
+            }
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute("download", `CFO_MIS_Board_Pack_${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        })
+        .catch(err => alert("Error generating CFO MIS Pack: " + err.message));
 }

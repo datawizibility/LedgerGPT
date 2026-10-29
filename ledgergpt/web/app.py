@@ -59,18 +59,21 @@ def get_dashboard_periods():
 @app.route("/api/dashboard/summary", methods=["GET"])
 def get_dashboard_summary():
     fy = request.args.get("fy", None, type=str)
-    return jsonify(dashboard_service.get_executive_summary(fy=fy))
+    cost_centre = request.args.get("cost_centre", None, type=str)
+    return jsonify(dashboard_service.get_executive_summary(fy=fy, cost_centre=cost_centre))
 
 @app.route("/api/dashboard/monthly-trend", methods=["GET"])
 def get_dashboard_monthly_trend():
     fy = request.args.get("fy", None, type=str)
-    return jsonify(dashboard_service.get_monthly_trend(fy=fy))
+    cost_centre = request.args.get("cost_centre", None, type=str)
+    return jsonify(dashboard_service.get_monthly_trend(fy=fy, cost_centre=cost_centre))
 
 @app.route("/api/dashboard/rankings", methods=["GET"])
 def get_dashboard_rankings():
     top_n = request.args.get("top_n", 10, type=int)
     fy = request.args.get("fy", None, type=str)
-    return jsonify(dashboard_service.get_rankings(top_n=top_n, fy=fy))
+    cost_centre = request.args.get("cost_centre", None, type=str)
+    return jsonify(dashboard_service.get_rankings(top_n=top_n, fy=fy, cost_centre=cost_centre))
 
 @app.route("/api/dashboard/vouchers-grid", methods=["GET"])
 def get_dashboard_vouchers_grid():
@@ -78,10 +81,28 @@ def get_dashboard_vouchers_grid():
     page_size = request.args.get("page_size", 50, type=int)
     vtype = request.args.get("type", None, type=str)
     fy = request.args.get("fy", None, type=str)
+    cost_centre = request.args.get("cost_centre", None, type=str)
     search = request.args.get("search", None, type=str)
     return jsonify(dashboard_service.get_vouchers_grid(
-        page=page, page_size=page_size, vtype=vtype, search=search, fy=fy
+        page=page, page_size=page_size, vtype=vtype, search=search, fy=fy, cost_centre=cost_centre
     ))
+
+@app.route("/api/dashboard/cost-centres", methods=["GET"])
+def get_dashboard_cost_centres():
+    return jsonify(dashboard_service.get_available_cost_centres())
+
+@app.route("/api/dashboard/aging", methods=["GET"])
+def get_dashboard_aging():
+    nature = request.args.get("nature", "all", type=str)
+    cost_centre = request.args.get("cost_centre", None, type=str)
+    fy = request.args.get("fy", None, type=str)
+    return jsonify(dashboard_service.get_aging_summary(nature=nature, cost_centre=cost_centre, fy=fy))
+
+@app.route("/api/dashboard/cfo-mis-pack", methods=["GET"])
+def get_cfo_mis_pack():
+    fy = request.args.get("fy", None, type=str)
+    cost_centre = request.args.get("cost_centre", None, type=str)
+    return jsonify(dashboard_service.get_cfo_mis_pack(fy=fy, cost_centre=cost_centre))
 
 @app.route("/api/chat", methods=["POST"])
 def chat():

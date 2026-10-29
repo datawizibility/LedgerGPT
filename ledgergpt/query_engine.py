@@ -8,11 +8,13 @@ import time
 from ledgergpt.db import FinancialDB
 from ledgergpt.formatters import format_inr
 from ledgergpt.llm_adapter import LLMAdapter
+from ledgergpt.dashboard_service import DashboardService
 
 class QueryEngine:
     def __init__(self, db=None, llm_adapter=None):
         self.db = db or FinancialDB()
         self.llm = llm_adapter or LLMAdapter()
+        self.dashboard_service = DashboardService(db=self.db)
 
     def process_query(self, user_query):
         """
@@ -64,7 +66,68 @@ class QueryEngine:
 
     def _match_deterministic(self, lower_q, original_q):
         """Rule-based deterministic financial intents."""
-        
+
+        # 0. Bill-by-Bill Debtor & Creditor Aging Intent
+        if any(w in lower_q for w in ["aging", "bills outstanding", "pending bills", "overdue bills", "overdue debtors", "overdue creditors", "who owes", "receivable aging", "payable aging"]):
+            nature = "all"
+            if any(k in lower_q for k in ["debtor", "receivable", "customer", "who owes"]):
+                nature = "receivable"
+            elif any(k in lower_q for k in ["creditor", "payable", "vendor", "supplier"]):
+                nature = "payable"
+
+            aging_data = self.dashboard_service.get_aging_summary(nature=nature)
+            rec = aging_data["summary"]["receivables"]
+            pay = aging_data["summary"]["payables"]
+            crit_cnt = sum(1 for b in aging_data["bills"] if b.get("risk_level") == "CRITICAL")
+
+            ans = (
+                f"**Bill-by-Bill Debtor & Creditor Aging Analysis**:\n"
+                f"- **Outstanding Receivables (Debtors)**: **{rec['total_formatted']}** "
+                f"(0-30d: {rec['bucket_0_30_formatted']}, 31-60d: {rec['bucket_31_60_formatted']}, 61-90d: {rec['bucket_61_90_formatted']}, 90+d: {rec['bucket_90_plus_formatted']})\n"
+                f"- **Outstanding Payables (Creditors)**: **{pay['total_formatted']}** "
+                f"(0-30d: {pay['bucket_0_30_formatted']}, 31-60d: {pay['bucket_31_60_formatted']}, 61-90d: {pay['bucket_61_90_formatted']}, 90+d: {pay['bucket_90_plus_formatted']})\n"
+                f"- **Critical Overdue (>90 Days)**: **{crit_cnt} pending bills** flagged for high collection/settlement risk."
+            )
+
+            cols = ["bill_type", "party_name", "bill_ref", "bill_date", "overdue_days", "outstanding_formatted", "aging_bucket", "risk_level"]
+            return {
+                "answer": ans,
+                "sql": "SELECT bill_type, party_name, bill_ref, bill_date, overdue_days, outstanding_amount FROM bills_outstanding ORDER BY overdue_days DESC",
+                "row_count": len(aging_data["bills"]),
+                "data": aging_data["bills"],
+                "columns": cols
+            }
+
+        # 0b. Section 269SS / 269T Statutory Tax Audit Intent (CA Ramajayam Rule)
+        if any(w in lower_q for w in ["269ss", "269t", "tax audit", "form 3cd", "cash loan", "clause 31"]):
+            from ledgergpt.forensic import ForensicScanner
+            scanner = ForensicScanner(db=self.db)
+            report = scanner.detect_section_269ss_269t_violations()
+            flagged = report["total_flagged"]
+            ans = f"**Section 269SS / 269T Tax Audit Scan (Form 3CD Clause 31)**:\nTotal Flagged Violations: **{flagged} transactions** where cash loans, deposits, or specified advances exceed the statutory limit of **₹20,000**."
+            return {
+                "answer": ans,
+                "sql": "SELECT * FROM vouchers WHERE gross_amount >= 20000 AND (party_name LIKE '%cash%' OR primary_ledger LIKE '%cash%')",
+                "row_count": flagged,
+                "data": report["records"],
+                "columns": ["date", "voucher_type", "voucher_no", "party_name", "primary_ledger", "gross_amount", "clause_violation", "narration"]
+            }
+
+        # 0c. Negative Cash Balance Audit Intent
+        if any(w in lower_q for w in ["negative cash", "cash deficit"]):
+            from ledgergpt.forensic import ForensicScanner
+            scanner = ForensicScanner(db=self.db)
+            report = scanner.detect_negative_cash_balances()
+            flagged = report["total_flagged"]
+            ans = f"**Negative Cash Balance Audit Scan**:\nTotal Flagged Dates: **{flagged} days** where cumulative physical cash-in-hand dropped below ₹0.00."
+            return {
+                "answer": ans,
+                "sql": "SELECT date, SUM(inflow - outflow) FROM vouchers WHERE ledger LIKE '%cash%' GROUP BY date",
+                "row_count": flagged,
+                "data": report["records"],
+                "columns": ["date", "daily_inflow", "daily_outflow", "closing_cash_balance", "negative_deficit", "status"]
+            }
+
         # 1. Total Sales / Revenue Query
         if ("total sales" in lower_q or "gross sales" in lower_q or "how much sales" in lower_q or lower_q == "sales"):
             fy_match = re.search(r"fy\s*(\d{4}[-_]\d{2})", lower_q)
@@ -185,6 +248,21 @@ class QueryEngine:
             LIMIT ?
             """
             rows = self.db.execute_query(sql, (n,))
+            if not rows:
+                fallback_sql = """
+                SELECT party_name, COUNT(*) as vouchers,
+                       ROUND(SUM(net_amount), 2) as net_sales,
+                       ROUND(SUM(tax_amount), 2) as tax_amount,
+                       ROUND(SUM(gross_amount), 2) as gross_billed
+                FROM vouchers
+                WHERE LOWER(voucher_type) IN ('receipt', 'journal')
+                  AND party_name IS NOT NULL AND party_name != '' AND party_name != 'Sundry Party'
+                GROUP BY party_name
+                ORDER BY gross_billed DESC
+                LIMIT ?
+                """
+                rows = self.db.execute_query(fallback_sql, (n,))
+
             top_party = rows[0]["party_name"] if rows else "N/A"
             top_amt = rows[0]["gross_billed"] if rows else 0.0
             
@@ -213,6 +291,21 @@ class QueryEngine:
             LIMIT ?
             """
             rows = self.db.execute_query(sql, (n,))
+            if not rows:
+                fallback_sql = """
+                SELECT party_name, COUNT(*) as vouchers,
+                       ROUND(SUM(net_amount), 2) as net_sales,
+                       ROUND(SUM(tax_amount), 2) as tax_amount,
+                       ROUND(SUM(gross_amount), 2) as gross_billed
+                FROM vouchers
+                WHERE LOWER(voucher_type) IN ('receipt', 'journal')
+                  AND party_name IS NOT NULL AND party_name != '' AND party_name != 'Sundry Party'
+                GROUP BY party_name
+                ORDER BY gross_billed DESC
+                LIMIT ?
+                """
+                rows = self.db.execute_query(fallback_sql, (n,))
+
             top_party = rows[0]["party_name"] if rows else "N/A"
             top_amt = rows[0]["gross_billed"] if rows else 0.0
             

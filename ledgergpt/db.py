@@ -69,6 +69,25 @@ class FinancialDB:
         )
         """)
 
+        # Bills Outstanding Table for Live Aging & Bill Tracking
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bills_outstanding (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_type TEXT NOT NULL, -- 'Receivable' or 'Payable'
+            bill_date TEXT NOT NULL,
+            bill_ref TEXT,
+            party_name TEXT NOT NULL,
+            outstanding_amount REAL DEFAULT 0.0,
+            overdue_days INTEGER DEFAULT 0,
+            cost_centre TEXT DEFAULT 'General / Untagged',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bills_type ON bills_outstanding(bill_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bills_party ON bills_outstanding(party_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bills_days ON bills_outstanding(overdue_days)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bills_cc ON bills_outstanding(cost_centre)")
+
         # Core Financial Indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vch_type ON vouchers(voucher_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vch_date ON vouchers(date)")
@@ -191,6 +210,43 @@ class FinancialDB:
         if not self._shared_conn:
             conn.close()
         return result
+
+    def insert_bills_batch(self, bills_list):
+        """Batch inserts bills outstanding records."""
+        if not bills_list:
+            return 0
+        defaults = {
+            "bill_type": "Payable", "bill_date": "", "bill_ref": "-",
+            "party_name": "Sundry Party", "outstanding_amount": 0.0,
+            "overdue_days": 0, "cost_centre": "General / Untagged"
+        }
+        sanitized = [{**defaults, **b} for b in bills_list]
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        sql = """
+        INSERT INTO bills_outstanding (
+            bill_type, bill_date, bill_ref, party_name, outstanding_amount, overdue_days, cost_centre
+        ) VALUES (
+            :bill_type, :bill_date, :bill_ref, :party_name, :outstanding_amount, :overdue_days, :cost_centre
+        )
+        """
+        cursor.executemany(sql, sanitized)
+        conn.commit()
+        if not self._shared_conn:
+            conn.close()
+        return len(sanitized)
+
+    def clear_bills(self, bill_type=None):
+        """Clears bills outstanding table, optionally filtered by bill_type."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if bill_type:
+            cursor.execute("DELETE FROM bills_outstanding WHERE LOWER(bill_type) = LOWER(?)", (bill_type,))
+        else:
+            cursor.execute("DELETE FROM bills_outstanding")
+        conn.commit()
+        if not self._shared_conn:
+            conn.close()
 
     def set_metadata(self, key, value):
         """Sets a key-value pair in company_metadata table."""

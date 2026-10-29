@@ -31,10 +31,17 @@
         <div class="nav-actions">
             <div class="period-select-box">
                 <span style="font-size: 11px; color: #D1D8E0; font-weight:600;">📅 FY:</span>
-                <select id="globalPeriodSelect" onchange="applyGlobalPeriod()">
+                <select id="globalPeriodSelect" onchange="applyGlobalFilters()">
                     <option value="All">All Fiscal Years</option>
                 </select>
             </div>
+            <div class="period-select-box">
+                <span style="font-size: 11px; color: #D1D8E0; font-weight:600;">📍 Site:</span>
+                <select id="globalCostCentreSelect" onchange="applyGlobalFilters()">
+                    <option value="All">All Sites / Cost Centres</option>
+                </select>
+            </div>
+            <button class="btn btn-outline" style="background: #2E86DE; color:#fff;" onclick="downloadCfoMisPack()">📑 CFO MIS Pack</button>
             <button class="btn btn-sync" id="syncTallyBtn" onclick="openSyncModal()">🔄 Sync Active Tally</button>
             <button class="btn btn-outline" onclick="openForensicModal()">🛡️ Forensic Audit Scanner</button>
         </div>
@@ -147,6 +154,69 @@
                             <div class="tile-stat-total">
                                 <span>Current Ratio | Debtor Days:</span>
                                 <strong id="tallyRatios">--</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ROW 1.5: BILL-BY-BILL DEBTOR & CREDITOR AGING (EASYREPORTS BENCHMARK) -->
+                <div class="dash-grid-2" style="margin-bottom: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <!-- RECEIVABLES AGING BUCKETS -->
+                    <div class="tally-metric-tile">
+                        <div class="tile-header">
+                            <span class="tile-title">⏳ Debtors Aging (Receivables)</span>
+                            <span class="tally-live-tag" style="background:#EBF5FB; color:#2980B9;">Bill-by-Bill</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="tile-stat-row">
+                                <span>0 to 30 Days (Current):</span>
+                                <strong id="agingRec030">--</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>31 to 60 Days:</span>
+                                <strong id="agingRec3160">--</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>61 to 90 Days:</span>
+                                <strong id="agingRec6190" style="color:#D35400;">--</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>Above 90 Days (Overdue):</span>
+                                <strong id="agingRec90Plus" style="color:#C0392B;">--</strong>
+                            </div>
+                            <div class="tile-stat-total">
+                                <span>Total Pending Receivables:</span>
+                                <strong id="agingRecTotal" style="color:#2980B9;">--</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PAYABLES AGING BUCKETS -->
+                    <div class="tally-metric-tile">
+                        <div class="tile-header">
+                            <span class="tile-title">⌛ Creditors Aging (Payables)</span>
+                            <span class="tally-live-tag" style="background:#FEF9E7; color:#D35400;">Bill-by-Bill</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="tile-stat-row">
+                                <span>0 to 30 Days (Current):</span>
+                                <strong id="agingPay030">--</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>31 to 60 Days:</span>
+                                <strong id="agingPay3160">--</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>61 to 90 Days:</span>
+                                <strong id="agingPay6190" style="color:#D35400;">--</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>Above 90 Days (Overdue):</span>
+                                <strong id="agingPay90Plus" style="color:#C0392B;">--</strong>
+                            </div>
+                            <div class="tile-stat-total">
+                                <span>Total Pending Payables:</span>
+                                <strong id="agingPayTotal" style="color:#D35400;">--</strong>
                             </div>
                         </div>
                     </div>
@@ -314,12 +384,13 @@
                         
                         <div class="prompt-pills-title">Quick Inquiries You Can Click:</div>
                         <div class="prompt-pills">
-                            <button class="pill" onclick="sendQuickQuery('Total sales and gross margin')">💰 Total sales & gross margin</button>
-                            <button class="pill" onclick="sendQuickQuery('Top 10 clients by gross billed amount')">🏆 Top 10 clients by revenue</button>
-                            <button class="pill" onclick="sendQuickQuery('Total purchases and top 10 vendors')">🛒 Total purchases & top vendors</button>
-                            <button class="pill" onclick="sendQuickQuery('Show all Debit Notes issued')">📑 Show all Debit Notes</button>
+                            <button class="pill" onclick="sendQuickQuery('Show creditors aging')">⌛ Creditors Aging</button>
+                            <button class="pill" onclick="sendQuickQuery('Show debtors aging')">⏳ Debtors Aging</button>
                             <button class="pill" onclick="sendQuickQuery('Show cash inflow and outflow')">💸 Cash Inflow vs Outflow</button>
-                            <button class="pill" onclick="sendQuickQuery('Vouchers with narration containing cancel')">🔍 Search narrations for 'cancel'</button>
+                            <button class="pill" onclick="sendQuickQuery('Scan Section 269SS and 269T cash loan violations')">⚖️ Section 269SS/269T Audit</button>
+                            <button class="pill" onclick="sendQuickQuery('Top 10 vendors by billed amount')">🛒 Top Vendors Spend</button>
+                            <button class="pill" onclick="sendQuickQuery('Show all Debit Notes issued')">📑 Show all Debit Notes</button>
+                            <button class="pill" onclick="sendQuickQuery('Total sales and gross margin')">💰 Total sales & margin</button>
                         </div>
                     </div>
                 </div>
@@ -398,6 +469,6 @@
 
     <!-- SCRIPTS -->
     <script src="/static/js/chart.min.js"></script>
-    <script src="/static/js/app.js?v=1.3.0"></script>
+    <script src="/static/js/app.js?v=1.4.0"></script>
 </body>
 </html>

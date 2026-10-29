@@ -27,13 +27,31 @@ class DashboardService:
             periods = [r[0] for r in cursor.fetchall()]
             return periods if periods else ["FY 2026-27", "FY 2018-19", "FY 2017-18"]
 
-    def get_executive_summary(self, fy=None):
+    def get_available_cost_centres(self):
+        """Returns distinct cost centres/projects present in vouchers."""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT cost_centre 
+                FROM vouchers 
+                WHERE cost_centre IS NOT NULL AND TRIM(cost_centre) != ''
+                ORDER BY cost_centre ASC
+            """)
+            ccs = [r[0] for r in cursor.fetchall()]
+            return ccs if ccs else ["General / Untagged"]
+
+    def get_executive_summary(self, fy=None, cost_centre=None):
         """Computes top-level financial health KPIs, Tally liquidity, and balance sheet metrics."""
-        where_fy = ""
+        where_clauses = []
         params = []
         if fy and fy != "All":
-            where_fy = " AND financial_year = ?"
+            where_clauses.append("financial_year = ?")
             params.append(fy)
+        if cost_centre and cost_centre != "All":
+            where_clauses.append("cost_centre = ?")
+            params.append(cost_centre)
+
+        filter_str = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
 
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -45,7 +63,7 @@ class DashboardService:
                     COALESCE(SUM(gross_amount), 0), 
                     COALESCE(SUM(net_amount), 0), 
                     COALESCE(SUM(tax_amount), 0)
-                FROM vouchers WHERE voucher_type = 'Sales' {where_fy}
+                FROM vouchers WHERE voucher_type = 'Sales' {filter_str}
             """, params)
             s_cnt, s_gross, s_net, s_tax = cursor.fetchone()
 
@@ -56,29 +74,29 @@ class DashboardService:
                     COALESCE(SUM(gross_amount), 0), 
                     COALESCE(SUM(net_amount), 0), 
                     COALESCE(SUM(tax_amount), 0)
-                FROM vouchers WHERE voucher_type = 'Purchase' {where_fy}
+                FROM vouchers WHERE voucher_type = 'Purchase' {filter_str}
             """, params)
             p_cnt, p_gross, p_net, p_tax = cursor.fetchone()
 
             # Debit Notes
-            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Debit Note' {where_fy}", params)
+            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Debit Note' {filter_str}", params)
             dn_cnt, dn_gross = cursor.fetchone()
 
             # Credit Notes
-            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Credit Note' {where_fy}", params)
+            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Credit Note' {filter_str}", params)
             cn_cnt, cn_gross = cursor.fetchone()
 
             # Cash Inflow (Receipts) & Cash Outflow (Payments)
-            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Receipt' {where_fy}", params)
+            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Receipt' {filter_str}", params)
             rec_cnt, cash_inflow = cursor.fetchone()
 
-            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Payment' {where_fy}", params)
+            cursor.execute(f"SELECT COUNT(*), COALESCE(SUM(gross_amount), 0) FROM vouchers WHERE voucher_type = 'Payment' {filter_str}", params)
             pay_cnt, cash_outflow = cursor.fetchone()
 
             net_cash_flow = cash_inflow - cash_outflow
 
             # Distinct counts & date ranges
-            where_all = f"WHERE 1=1 {where_fy}" if where_fy else ""
+            where_all = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
             cursor.execute(f"""
                 SELECT 
                     COUNT(*),
@@ -173,13 +191,18 @@ class DashboardService:
                 "payables_formatted": format_inr(7755247.0 if "BHARAT" in active_company.upper() else t_metrics.get("sundry_creditors", 25865748.68)),
             }
 
-    def get_monthly_trend(self, fy=None):
+    def get_monthly_trend(self, fy=None, cost_centre=None):
         """Returns monthly time series of Sales vs Purchases and Margin."""
-        where_fy = ""
+        where_clauses = ["date IS NOT NULL AND date != ''"]
         params = []
         if fy and fy != "All":
-            where_fy = " AND financial_year = ?"
+            where_clauses.append("financial_year = ?")
             params.append(fy)
+        if cost_centre and cost_centre != "All":
+            where_clauses.append("cost_centre = ?")
+            params.append(cost_centre)
+
+        where_str = " AND ".join(where_clauses)
 
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -192,7 +215,7 @@ class DashboardService:
                     SUM(CASE WHEN voucher_type = 'Purchase' THEN gross_amount ELSE 0 END) as purchase,
                     COUNT(*) as total_vouchers
                 FROM vouchers
-                WHERE date IS NOT NULL AND date != '' {where_fy}
+                WHERE {where_str}
                 GROUP BY strftime('%Y-%m', date)
                 ORDER BY ym ASC
             """
@@ -232,13 +255,18 @@ class DashboardService:
                 "vouchers": vouchers
             }
 
-    def get_rankings(self, top_n=10, fy=None):
+    def get_rankings(self, top_n=10, fy=None, cost_centre=None):
         """Returns Top Debtors, Top Creditors, and Top Cost Centres."""
-        where_fy = ""
-        params = []
+        where_clauses_base = []
+        params_base = []
         if fy and fy != "All":
-            where_fy = " AND financial_year = ?"
-            params.append(fy)
+            where_clauses_base.append("financial_year = ?")
+            params_base.append(fy)
+        if cost_centre and cost_centre != "All":
+            where_clauses_base.append("cost_centre = ?")
+            params_base.append(cost_centre)
+
+        filter_base = (" AND " + " AND ".join(where_clauses_base)) if where_clauses_base else ""
 
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -247,11 +275,11 @@ class DashboardService:
             cursor.execute(f"""
                 SELECT party_name, SUM(gross_amount) as total_val, COUNT(*) as vch_count
                 FROM vouchers
-                WHERE voucher_type = 'Sales' AND party_name != 'Sundry Party' AND party_name != '' {where_fy}
+                WHERE voucher_type = 'Sales' AND party_name != 'Sundry Party' AND party_name != '' {filter_base}
                 GROUP BY party_name
                 ORDER BY total_val DESC
                 LIMIT ?
-            """, params + [top_n])
+            """, params_base + [top_n])
             debtors = [
                 {
                     "party_name": r[0],
@@ -266,11 +294,11 @@ class DashboardService:
             cursor.execute(f"""
                 SELECT party_name, SUM(gross_amount) as total_val, COUNT(*) as vch_count
                 FROM vouchers
-                WHERE voucher_type = 'Purchase' AND party_name != 'Sundry Party' AND party_name != '' {where_fy}
+                WHERE voucher_type = 'Purchase' AND party_name != 'Sundry Party' AND party_name != '' {filter_base}
                 GROUP BY party_name
                 ORDER BY total_val DESC
                 LIMIT ?
-            """, params + [top_n])
+            """, params_base + [top_n])
             creditors = [
                 {
                     "party_name": r[0],
@@ -289,12 +317,12 @@ class DashboardService:
                     SUM(CASE WHEN voucher_type = 'Purchase' THEN gross_amount ELSE 0 END) as p_val,
                     COUNT(*) as vch_count
                 FROM vouchers
-                WHERE cost_centre IS NOT NULL AND cost_centre != '' AND cost_centre != 'General / Untagged' {where_fy}
+                WHERE cost_centre IS NOT NULL AND cost_centre != '' AND cost_centre != 'General / Untagged' {filter_base}
                 GROUP BY cost_centre
                 HAVING s_val > 0 OR p_val > 0
                 ORDER BY s_val DESC
                 LIMIT ?
-            """, params + [top_n])
+            """, params_base + [top_n])
             cost_centres = []
             for r in cursor.fetchall():
                 cc_name, s_val, p_val, cnt = r
@@ -320,7 +348,7 @@ class DashboardService:
                 "top_cost_centres": cost_centres
             }
 
-    def get_vouchers_grid(self, page=1, page_size=50, vtype=None, search=None, fy=None):
+    def get_vouchers_grid(self, page=1, page_size=50, vtype=None, search=None, fy=None, cost_centre=None):
         """Returns paginated, filterable voucher records for table drilldown."""
         offset = (page - 1) * page_size
         where_clauses = ["1=1"]
@@ -333,6 +361,10 @@ class DashboardService:
         if fy and fy != "All":
             where_clauses.append("financial_year = ?")
             params.append(fy)
+
+        if cost_centre and cost_centre != "All":
+            where_clauses.append("cost_centre = ?")
+            params.append(cost_centre)
 
         if search and search.strip():
             where_clauses.append("(party_name LIKE ? OR narration LIKE ? OR cost_centre LIKE ? OR voucher_no LIKE ?)")
@@ -386,3 +418,181 @@ class DashboardService:
                 "total_pages": (total_rows + page_size - 1) // page_size if total_rows > 0 else 1,
                 "items": items
             }
+
+    def get_aging_summary(self, nature="all", cost_centre=None, fy=None):
+        """
+        Computes Bill-by-Bill Debtor & Creditor Aging Buckets:
+        - 0-30 Days (Current)
+        - 31-60 Days
+        - 61-90 Days
+        - 90+ Days (Critical / High Risk)
+        Uses live bills_outstanding table if populated, with fallback to vouchers.
+        """
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM bills_outstanding")
+            has_bills = cursor.fetchone()[0] > 0
+
+            if has_bills:
+                where_clauses = ["1=1"]
+                params = []
+                if nature and nature.lower() in ["receivable", "payable"]:
+                    where_clauses.append("LOWER(bill_type) = LOWER(?)")
+                    params.append(nature)
+                if cost_centre and cost_centre != "All":
+                    where_clauses.append("cost_centre = ?")
+                    params.append(cost_centre)
+
+                where_str = " AND ".join(where_clauses)
+                cursor.execute(f"""
+                    SELECT bill_type, bill_date, bill_ref, party_name, outstanding_amount, overdue_days, cost_centre
+                    FROM bills_outstanding
+                    WHERE {where_str}
+                    ORDER BY overdue_days DESC, outstanding_amount DESC
+                """, params)
+                raw_bills = cursor.fetchall()
+            else:
+                raw_bills = self._calculate_fallback_aging(cost_centre=cost_centre, fy=fy)
+
+            rec_buckets = {"0_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0, "total": 0.0, "count": 0}
+            pay_buckets = {"0_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0, "total": 0.0, "count": 0}
+            detailed_list = []
+
+            for r in raw_bills:
+                b_type, b_date, b_ref, party, amt, days, cc = r[0], r[1], r[2], r[3], float(r[4] or 0), int(r[5] or 0), r[6]
+                if days <= 30:
+                    bucket = "0-30 Days"
+                    key = "0_30"
+                    risk = "LOW"
+                elif days <= 60:
+                    bucket = "31-60 Days"
+                    key = "31_60"
+                    risk = "MODERATE"
+                elif days <= 90:
+                    bucket = "61-90 Days"
+                    key = "61_90"
+                    risk = "ELEVATED"
+                else:
+                    bucket = "90+ Days"
+                    key = "90_plus"
+                    risk = "CRITICAL"
+
+                if b_type.lower() == "receivable":
+                    rec_buckets[key] += amt
+                    rec_buckets["total"] += amt
+                    rec_buckets["count"] += 1
+                else:
+                    pay_buckets[key] += amt
+                    pay_buckets["total"] += amt
+                    pay_buckets["count"] += 1
+
+                detailed_list.append({
+                    "bill_type": b_type,
+                    "bill_date": b_date,
+                    "bill_ref": b_ref or "-",
+                    "party_name": party,
+                    "outstanding_amount": amt,
+                    "outstanding_formatted": format_inr(amt),
+                    "overdue_days": days,
+                    "aging_bucket": bucket,
+                    "risk_level": risk,
+                    "cost_centre": cc or "General"
+                })
+
+            return {
+                "summary": {
+                    "receivables": {
+                        "total": rec_buckets["total"],
+                        "total_formatted": format_inr(rec_buckets["total"]),
+                        "count": rec_buckets["count"],
+                        "bucket_0_30": rec_buckets["0_30"],
+                        "bucket_0_30_formatted": format_inr(rec_buckets["0_30"]),
+                        "bucket_31_60": rec_buckets["31_60"],
+                        "bucket_31_60_formatted": format_inr(rec_buckets["31_60"]),
+                        "bucket_61_90": rec_buckets["61_90"],
+                        "bucket_61_90_formatted": format_inr(rec_buckets["61_90"]),
+                        "bucket_90_plus": rec_buckets["90_plus"],
+                        "bucket_90_plus_formatted": format_inr(rec_buckets["90_plus"]),
+                    },
+                    "payables": {
+                        "total": pay_buckets["total"],
+                        "total_formatted": format_inr(pay_buckets["total"]),
+                        "count": pay_buckets["count"],
+                        "bucket_0_30": pay_buckets["0_30"],
+                        "bucket_0_30_formatted": format_inr(pay_buckets["0_30"]),
+                        "bucket_31_60": pay_buckets["31_60"],
+                        "bucket_31_60_formatted": format_inr(pay_buckets["31_60"]),
+                        "bucket_61_90": pay_buckets["61_90"],
+                        "bucket_61_90_formatted": format_inr(pay_buckets["61_90"]),
+                        "bucket_90_plus": pay_buckets["90_plus"],
+                        "bucket_90_plus_formatted": format_inr(pay_buckets["90_plus"]),
+                    }
+                },
+                "bills": detailed_list
+            }
+
+    def _calculate_fallback_aging(self, cost_centre=None, fy=None):
+        """Fallback aging calculation from vouchers when bills_outstanding is empty."""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            where_clauses = ["party_name IS NOT NULL AND party_name != '' AND party_name != 'Sundry Party'"]
+            params = []
+            if fy and fy != "All":
+                where_clauses.append("financial_year = ?")
+                params.append(fy)
+            if cost_centre and cost_centre != "All":
+                where_clauses.append("cost_centre = ?")
+                params.append(cost_centre)
+
+            where_str = " AND ".join(where_clauses)
+            cursor.execute(f"""
+                SELECT party_name,
+                       SUM(CASE WHEN LOWER(voucher_type) IN ('sales', 'payment', 'debit note') THEN gross_amount ELSE 0 END) as dr,
+                       SUM(CASE WHEN LOWER(voucher_type) IN ('purchase', 'receipt', 'credit note') THEN gross_amount ELSE 0 END) as cr,
+                       MAX(date) as last_date,
+                       cost_centre
+                FROM vouchers
+                WHERE {where_str}
+                GROUP BY party_name
+            """, params)
+            rows = cursor.fetchall()
+
+            as_of = datetime.now()
+            fallback_bills = []
+            for party, dr, cr, ldate, cc in rows:
+                diff = (dr or 0) - (cr or 0)
+                days = 0
+                if ldate:
+                    try:
+                        days = (as_of - datetime.strptime(ldate, "%Y-%m-%d")).days
+                    except Exception:
+                        days = 0
+
+                if diff > 10.0:
+                    fallback_bills.append(("Receivable", ldate or "2026-10-01", "AUTO-REC", party, diff, max(days, 0), cc))
+                elif diff < -10.0:
+                    fallback_bills.append(("Payable", ldate or "2026-10-01", "AUTO-PAY", party, abs(diff), max(days, 0), cc))
+
+            return fallback_bills
+
+    def get_cfo_mis_pack(self, fy=None, cost_centre=None):
+        """Assembles comprehensive executive CFO MIS board pack."""
+        summary = self.get_executive_summary(fy=fy, cost_centre=cost_centre)
+        aging = self.get_aging_summary(nature="all", cost_centre=cost_centre, fy=fy)
+        rankings = self.get_rankings(top_n=10, fy=fy, cost_centre=cost_centre)
+        monthly = self.get_monthly_trend(fy=fy, cost_centre=cost_centre)
+        active_co = self.db.get_metadata("active_company", "BHARAT VANIJYA EASTERN PRIVATE LIMITED")
+
+        return {
+            "report_title": f"CFO Executive MIS Report - {active_co}",
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "company_name": active_co,
+            "period": fy or "All Fiscal Periods",
+            "cost_centre": cost_centre or "All Sites",
+            "executive_summary": summary,
+            "aging_overview": aging["summary"],
+            "top_debtors": rankings["top_debtors"],
+            "top_creditors": rankings["top_creditors"],
+            "monthly_performance": monthly,
+            "critical_overdue_bills": [b for b in aging["bills"] if b["risk_level"] == "CRITICAL"][:15]
+        }

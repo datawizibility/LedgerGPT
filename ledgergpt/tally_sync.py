@@ -302,6 +302,59 @@ class TallySyncEngine:
             print(f"[METRICS FETCH WARNING]: {e}")
         return balances
 
+    def fetch_tally_bills_outstanding(self, company_name):
+        """Fetches pending overdue bills receivable and payable directly from Tally XML."""
+        import html
+        escaped_co = html.escape(company_name)
+        xml_req = f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>BillsOutstanding</ID></HEADER>
+  <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT><SVCURRENTCOMPANY>{escaped_co}</SVCURRENTCOMPANY></STATICVARIABLES>
+  <TDL><TDLMESSAGE><COLLECTION NAME="BillsOutstanding" ISMODIFY="No"><TYPE>Bills</TYPE><FETCH>Name, BillDate, ClosingBalance, LedgerEntries.PartyName, LedgerEntries.PartyLedgerName, LedgerEntries.VoucherTypeName</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY>
+</ENVELOPE>"""
+        bills = []
+        as_of = datetime.now()
+        try:
+            req = urllib.request.Request(self.url, data=xml_req.encode("utf-8"), headers={"Content-Type": "text/xml; charset=utf-8"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw_bytes = resp.read()
+                text = raw_bytes.decode("utf-16le", errors="ignore") if (len(raw_bytes) >= 4 and raw_bytes[1] == 0) else raw_bytes.decode("utf-8", errors="ignore")
+                text = re.sub(r"^[^<]+", "", text)
+                text = re.sub(r"&#\d+;", "", text)
+                text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+                root = ET.fromstring(text)
+                for b in root.findall(".//BILL"):
+                    ref = (b.findtext("NAME") or "-").strip()
+                    bdate_raw = (b.findtext("BILLDATE") or "").strip()
+                    if len(bdate_raw) == 8:
+                        bdate_fmt = f"{bdate_raw[:4]}-{bdate_raw[4:6]}-{bdate_raw[6:]}"
+                    else:
+                        bdate_fmt = bdate_raw or datetime.now().strftime("%Y-%m-%d")
+
+                    bal = abs(float(b.findtext("CLOSINGBALANCE") or 0))
+                    party = (b.findtext(".//PARTYLEDGERNAME") or b.findtext(".//PARTYNAME") or "Sundry Party").strip()
+                    vtype = (b.findtext(".//VOUCHERTYPENAME") or "Purchase").strip()
+                    bill_type = "Payable" if vtype.lower() in ["purchase", "payment"] else "Receivable"
+
+                    days = 0
+                    if bdate_fmt:
+                        try:
+                            days = (as_of - datetime.strptime(bdate_fmt, "%Y-%m-%d")).days
+                        except Exception:
+                            days = 0
+
+                    bills.append({
+                        "bill_type": bill_type,
+                        "bill_date": bdate_fmt,
+                        "bill_ref": ref,
+                        "party_name": party,
+                        "outstanding_amount": bal,
+                        "overdue_days": max(days, 0),
+                        "cost_centre": "General / Untagged"
+                    })
+        except Exception as e:
+            print(f"[BILLS OUTSTANDING FETCH ERROR]: {e}")
+        return bills
+
     def sync(self, company_name=None, clear_existing=False):
         """
         Executes full sync pipeline:
@@ -332,6 +385,15 @@ class TallySyncEngine:
 
         count = self.db.insert_vouchers_batch(vouchers)
         self.db.rebuild_fts()
+
+        # Extract live bills outstanding
+        try:
+            bills = self.fetch_tally_bills_outstanding(target_company)
+            if bills:
+                self.db.clear_bills()
+                self.db.insert_bills_batch(bills)
+        except Exception as e:
+            print(f"[BILLS SYNC WARNING]: {e}")
 
         # Save active company and balance sheet snapshot
         metrics = self.fetch_tally_dashboard_metrics(target_company)
