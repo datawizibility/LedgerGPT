@@ -52,18 +52,25 @@ def get_kpis():
     return jsonify(kpis)
 
 # --- DASHBOARD ANALYTICS ENDPOINTS ---
+@app.route("/api/dashboard/periods", methods=["GET"])
+def get_dashboard_periods():
+    return jsonify(dashboard_service.get_available_periods())
+
 @app.route("/api/dashboard/summary", methods=["GET"])
 def get_dashboard_summary():
-    return jsonify(dashboard_service.get_executive_summary())
+    fy = request.args.get("fy", None, type=str)
+    return jsonify(dashboard_service.get_executive_summary(fy=fy))
 
 @app.route("/api/dashboard/monthly-trend", methods=["GET"])
 def get_dashboard_monthly_trend():
-    return jsonify(dashboard_service.get_monthly_trend())
+    fy = request.args.get("fy", None, type=str)
+    return jsonify(dashboard_service.get_monthly_trend(fy=fy))
 
 @app.route("/api/dashboard/rankings", methods=["GET"])
 def get_dashboard_rankings():
     top_n = request.args.get("top_n", 10, type=int)
-    return jsonify(dashboard_service.get_rankings(top_n=top_n))
+    fy = request.args.get("fy", None, type=str)
+    return jsonify(dashboard_service.get_rankings(top_n=top_n, fy=fy))
 
 @app.route("/api/dashboard/vouchers-grid", methods=["GET"])
 def get_dashboard_vouchers_grid():

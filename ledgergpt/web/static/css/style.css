@@ -81,6 +81,42 @@ body {
     color: #A0B2C6;
 }
 
+.company-badge-strip {
+    font-size: 11.5px;
+    color: #FFC107;
+    margin-top: 2px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 380px;
+}
+
+.company-badge-strip strong {
+    color: #FFFFFF;
+}
+
+.period-select-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.12);
+    padding: 3px 10px;
+    border-radius: 6px;
+}
+
+.period-select-box select {
+    background: #fff;
+    color: var(--navy);
+    border: none;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 700;
+    outline: none;
+    cursor: pointer;
+}
+
 /* VIEW SWITCHER SEGMENTED CONTROL */
 .view-switcher {
     display: flex;
@@ -259,6 +295,79 @@ body.view-chat .chat-pane {
     display: flex;
     flex-direction: column;
     gap: 16px;
+}
+
+/* TALLY PRIME DASHBOARD TILES */
+.dash-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+}
+
+.tally-metric-tile {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+}
+
+.tile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #ECEFF1;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+}
+
+.tile-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--navy);
+}
+
+.tally-live-tag {
+    font-size: 9px;
+    font-weight: 700;
+    background: #E8F8F5;
+    color: var(--green);
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.tile-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 11.5px;
+}
+
+.tile-stat-row {
+    display: flex;
+    justify-content: space-between;
+    color: #495057;
+}
+
+.tile-stat-row strong {
+    font-family: Consolas, monospace;
+}
+
+.tile-stat-total {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px dashed #DEE2E6;
+    font-weight: 700;
+    color: var(--navy);
+}
+
+.tile-stat-total strong {
+    font-family: Consolas, monospace;
 }
 
 .dash-card {

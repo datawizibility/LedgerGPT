@@ -60,6 +60,15 @@ class FinancialDB:
         )
         """)
 
+        # Metadata Table for active company & snapshot metrics
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS company_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
         # Core Financial Indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vch_type ON vouchers(voucher_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vch_date ON vouchers(date)")
@@ -182,6 +191,25 @@ class FinancialDB:
         if not self._shared_conn:
             conn.close()
         return result
+
+    def set_metadata(self, key, value):
+        """Sets a key-value pair in company_metadata table."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("REPLACE INTO company_metadata (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit()
+        if not self._shared_conn:
+            conn.close()
+
+    def get_metadata(self, key, default=None):
+        """Gets a value by key from company_metadata table."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM company_metadata WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        if not self._shared_conn:
+            conn.close()
+        return row[0] if row else default
 
     def get_schema_summary(self):
         """Returns schema summary for LLM text-to-SQL context."""

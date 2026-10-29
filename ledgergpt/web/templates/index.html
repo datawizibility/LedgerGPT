@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LedgerGPT Enterprise — Conversational Finance & Executive Analytics Cockpit</title>
+    <title>LedgerGPT Enterprise — Financial Intelligence & Executive Cockpit</title>
     <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=1.2.0">
+    <link rel="stylesheet" href="/static/css/style.css?v=1.3.0">
 </head>
 <body class="view-split">
     <!-- TOP NAVIGATION BAR -->
@@ -14,7 +14,9 @@
             <div class="logo-icon">📊</div>
             <div>
                 <div class="brand-title">LedgerGPT <span class="badge-pro">ENTERPRISE</span></div>
-                <div class="brand-sub">Zero-Hallucination Finance Intelligence for ERP & Tally Prime</div>
+                <div class="company-badge-strip" title="Currently Analyzed Company">
+                    🏢 <strong id="headerActiveCompany">Detecting Company...</strong>
+                </div>
             </div>
         </div>
 
@@ -25,8 +27,14 @@
             <button class="switch-btn" id="btnViewChat" onclick="setViewMode('chat')">💬 Copilot Focus</button>
         </div>
 
-        <!-- TOP ACTIONS -->
+        <!-- TOP ACTIONS & TIME FILTER -->
         <div class="nav-actions">
+            <div class="period-select-box">
+                <span style="font-size: 11px; color: #D1D8E0; font-weight:600;">📅 FY:</span>
+                <select id="globalPeriodSelect" onchange="applyGlobalPeriod()">
+                    <option value="All">All Fiscal Years</option>
+                </select>
+            </div>
             <button class="btn btn-sync" id="syncTallyBtn" onclick="openSyncModal()">🔄 Sync Active Tally</button>
             <button class="btn btn-outline" onclick="openForensicModal()">🛡️ Forensic Audit Scanner</button>
         </div>
@@ -67,33 +75,102 @@
                 </div>
                 <div class="dash-kpi-card slate-card">
                     <span class="dash-kpi-label">Total Audited Vouchers</span>
-                    <span class="dash-kpi-val" id="kpiDashVouchers">50,102</span>
+                    <span class="dash-kpi-val" id="kpiDashVouchers">Loading...</span>
                     <span class="dash-kpi-sub" id="kpiDashParties"></span>
                 </div>
             </div>
 
-            <!-- DASHBOARD CHARTS & ANALYTICS SECTION -->
+            <!-- DASHBOARD SCROLL CONTENT -->
             <div class="dash-content-scroll">
+
+                <!-- ROW 1: TALLY LIQUIDITY & BALANCE SHEET COCKPIT (BORROWED FROM TALLY DASHBOARD) -->
+                <div class="dash-grid-3">
+                    <!-- TALLY CASH & BANK BALANCES -->
+                    <div class="tally-metric-tile">
+                        <div class="tile-header">
+                            <span class="tile-title">🏦 Cash & Bank Balances (Closing)</span>
+                            <span class="tally-live-tag">Tally Prime Live</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="tile-stat-row">
+                                <span>Cash-in-Hand:</span>
+                                <strong id="tallyCashInHand" class="green">Loading...</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span id="tallyBankLabel">Bank Accounts:</span>
+                                <strong id="tallyBankBalance" class="green">Loading...</strong>
+                            </div>
+                            <div class="tile-stat-total">
+                                <span>Total Liquid Funds:</span>
+                                <strong id="tallyTotalLiquid">--</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TALLY CASH IN/OUT FLOW VELOCITY -->
+                    <div class="tally-metric-tile">
+                        <div class="tile-header">
+                            <span class="tile-title">💸 Cash In / Out Flow Velocity</span>
+                            <span class="tally-live-tag">Tally Flow</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="tile-stat-row">
+                                <span>Cash Inflow (Receipts):</span>
+                                <strong id="tallyCashInflow" class="green">Loading...</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>Cash Outflow (Payments):</span>
+                                <strong id="tallyCashOutflow" class="orange">Loading...</strong>
+                            </div>
+                            <div class="tile-stat-total">
+                                <span>Nett Cash Flow:</span>
+                                <strong id="tallyNetCashFlow">--</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TALLY WORKING CAPITAL & RATIOS -->
+                    <div class="tally-metric-tile">
+                        <div class="tile-header">
+                            <span class="tile-title">⚖️ Balance Sheet & Accounting Ratios</span>
+                            <span class="tally-live-tag">Key Ratios</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="tile-stat-row">
+                                <span>Current Assets vs Liab:</span>
+                                <strong id="tallyAssetsLiab">Loading...</strong>
+                            </div>
+                            <div class="tile-stat-row">
+                                <span>Pending Payables:</span>
+                                <strong id="tallyPayables" class="orange">Loading...</strong>
+                            </div>
+                            <div class="tile-stat-total">
+                                <span>Current Ratio | Debtor Days:</span>
+                                <strong id="tallyRatios">--</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 
-                <!-- ROW 1: 24-MONTH REVENUE VS EXPENSE TREND -->
+                <!-- ROW 2: 24-MONTH REVENUE VS EXPENSE TREND -->
                 <div class="dash-card">
                     <div class="dash-card-header">
                         <div>
-                            <h3 class="dash-card-title">📈 24-Month Revenue vs. Purchases & Margin Curve</h3>
-                            <span class="dash-card-subtitle">Monthly trajectory across FY 2017-18 and FY 2018-19</span>
+                            <h3 class="dash-card-title">📈 Monthly Revenue vs. Purchases & Margin Curve</h3>
+                            <span class="dash-card-subtitle" id="monthlyTrendSubtitle">Monthly trajectory across all active fiscal periods</span>
                         </div>
                         <div class="chart-legend-badge">
                             <span class="legend-dot green"></span> Sales Billed
-                            <span class="legend-dot orange"></span> Vendor Invoices
+                            <span class="legend-dot orange"></span> Vendor Outflows
                             <span class="legend-dot teal"></span> Margin
                         </div>
                     </div>
-                    <div class="chart-box" style="height: 280px; position: relative;">
+                    <div class="chart-box" style="height: 270px; position: relative;">
                         <canvas id="monthlyTrendChart"></canvas>
                     </div>
                 </div>
 
-                <!-- ROW 2: TOP CLIENTS & TOP VENDORS CONCENTRATION -->
+                <!-- ROW 3: TOP CLIENTS & TOP VENDORS CONCENTRATION -->
                 <div class="dash-grid-2">
                     <!-- TOP DEBTORS -->
                     <div class="dash-card">
@@ -108,12 +185,12 @@
                         </div>
                     </div>
 
-                    <!-- TOP CREDITORS -->
+                    <!-- TOP CREDITORS (RENAMED FROM MEDIA HOUSES TO VENDORS) -->
                     <div class="dash-card">
                         <div class="dash-card-header">
                             <div>
-                                <h3 class="dash-card-title">🛒 Top 10 Vendors / Media Houses Spend</h3>
-                                <span class="dash-card-subtitle">Ranked by direct subcontract outflows (Click bar to analyze)</span>
+                                <h3 class="dash-card-title">🛒 Top 10 Vendors / Creditors Spend</h3>
+                                <span class="dash-card-subtitle">Ranked by total vendor outflow & purchases (Click bar to analyze)</span>
                             </div>
                         </div>
                         <div class="chart-box" style="height: 260px; position: relative;">
@@ -122,19 +199,19 @@
                     </div>
                 </div>
 
-                <!-- ROW 3: COST CENTRE / PROJECT PROFITABILITY WATERFALL -->
+                <!-- ROW 4: COST CENTRE / PROJECT PROFITABILITY WATERFALL -->
                 <div class="dash-card">
                     <div class="dash-card-header">
                         <div>
                             <h3 class="dash-card-title">💼 Business Unit & Project Profitability Analysis</h3>
-                            <span class="dash-card-subtitle">Sales revenue, direct vendor costs, and gross margins by campaign</span>
+                            <span class="dash-card-subtitle">Sales revenue, direct vendor costs, and gross margins by project</span>
                         </div>
                     </div>
                     <div class="table-container" style="max-height: 240px;">
                         <table class="data-table" id="costCentresTable">
                             <thead>
                                 <tr>
-                                    <th>Cost Centre / Event Name</th>
+                                    <th>Cost Centre / Project Name</th>
                                     <th class="num-cell">Gross Billed</th>
                                     <th class="num-cell">Direct Outflow</th>
                                     <th class="num-cell">Gross Margin</th>
@@ -149,12 +226,12 @@
                     </div>
                 </div>
 
-                <!-- ROW 4: DEEP DRILLDOWN VOUCHER EXPLORER -->
+                <!-- ROW 5: DEEP DRILLDOWN VOUCHER EXPLORER -->
                 <div class="dash-card" style="margin-bottom: 30px;">
                     <div class="dash-card-header">
                         <div>
                             <h3 class="dash-card-title">📑 Comprehensive Voucher Ledger Explorer</h3>
-                            <span class="dash-card-subtitle">Paginated transactional audit trail across 50,000+ vouchers</span>
+                            <span class="dash-card-subtitle">Paginated transactional audit trail across all company vouchers</span>
                         </div>
                         <button class="btn btn-primary" style="font-size: 11px; padding: 5px 12px;" onclick="exportVouchersGrid()">📥 Export View as CSV</button>
                     </div>
@@ -169,14 +246,17 @@
                                 <option value="Purchase">Purchase</option>
                                 <option value="Debit Note">Debit Note</option>
                                 <option value="Credit Note">Credit Note</option>
+                                <option value="Payment">Payment</option>
+                                <option value="Receipt">Receipt</option>
+                                <option value="Journal">Journal</option>
+                                <option value="Contra">Contra</option>
                             </select>
                         </div>
                         <div class="grid-filter-group">
                             <label>FY:</label>
+                            <!-- DYNAMICALLY POPULATED BASED ON ACTUAL TALLY DATA -->
                             <select id="gridFilterFY" onchange="loadVouchersGrid(1)">
                                 <option value="All">All FYs</option>
-                                <option value="FY 2017-18">FY 2017-18</option>
-                                <option value="FY 2018-19">FY 2018-19</option>
                             </select>
                         </div>
                         <div class="grid-filter-group" style="flex: 1;">
@@ -234,11 +314,11 @@
                         
                         <div class="prompt-pills-title">Quick Inquiries You Can Click:</div>
                         <div class="prompt-pills">
-                            <button class="pill" onclick="sendQuickQuery('Total sales in FY 2017-18')">💰 Total sales in FY 2017-18</button>
+                            <button class="pill" onclick="sendQuickQuery('Total sales and gross margin')">💰 Total sales & gross margin</button>
                             <button class="pill" onclick="sendQuickQuery('Top 10 clients by gross billed amount')">🏆 Top 10 clients by revenue</button>
                             <button class="pill" onclick="sendQuickQuery('Total purchases and top 10 vendors')">🛒 Total purchases & top vendors</button>
                             <button class="pill" onclick="sendQuickQuery('Show all Debit Notes issued')">📑 Show all Debit Notes</button>
-                            <button class="pill" onclick="sendQuickQuery('Show all Credit Notes issued')">📋 Show all Credit Notes</button>
+                            <button class="pill" onclick="sendQuickQuery('Show cash inflow and outflow')">💸 Cash Inflow vs Outflow</button>
                             <button class="pill" onclick="sendQuickQuery('Vouchers with narration containing cancel')">🔍 Search narrations for 'cancel'</button>
                         </div>
                     </div>
@@ -249,13 +329,13 @@
             <div class="input-panel">
                 <form id="chatForm" onsubmit="handleChatSubmit(event)">
                     <div class="input-wrapper">
-                        <input type="text" id="userInput" placeholder="Ask any financial, voucher, debtor, or ledger question (e.g. 'Top 5 debtors', 'Sales in Q2', 'Vouchers for Bennett Coleman')..." autocomplete="off" required>
+                        <input type="text" id="userInput" placeholder="Ask any financial, voucher, debtor, or ledger question (e.g. 'Top 5 debtors', 'Sales in Q2', 'Vouchers for Om Sai Traders')..." autocomplete="off" required>
                         <button type="submit" class="btn btn-send" id="sendBtn">Ask Copilot ↵</button>
                     </div>
                 </form>
                 <div class="input-footnote">
                     <span>🛡️ <strong>Zero-Hallucination Policy:</strong> Verified SQL execution.</span>
-                    <span style="float: right;">Connected: <strong>Genesis Audited Books (50,102 Vouchers)</strong></span>
+                    <span style="float: right;">Connected Engine: <strong>Local Deterministic SQLite (FTS5)</strong></span>
                 </div>
             </div>
         </main>
@@ -318,6 +398,6 @@
 
     <!-- SCRIPTS -->
     <script src="/static/js/chart.min.js"></script>
-    <script src="/static/js/app.js?v=1.2.0"></script>
+    <script src="/static/js/app.js?v=1.3.0"></script>
 </body>
 </html>

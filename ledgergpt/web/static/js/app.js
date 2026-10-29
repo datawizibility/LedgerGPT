@@ -7,6 +7,7 @@ let currentGridPage = 1;
 let currentGridTotalPages = 1;
 let gridSearchTimer = null;
 let currentQueryData = null;
+let activeFinancialYear = 'All';
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -14,9 +15,50 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initDashboard() {
-    loadDashboardSummary();
-    loadMonthlyTrend();
-    loadRankings();
+    loadAvailablePeriods();
+    refreshDashboardViews();
+    loadVouchersGrid(1);
+}
+
+function refreshDashboardViews() {
+    loadDashboardSummary(activeFinancialYear);
+    loadMonthlyTrend(activeFinancialYear);
+    loadRankings(activeFinancialYear);
+}
+
+function loadAvailablePeriods() {
+    fetch('/api/dashboard/periods')
+        .then(res => res.json())
+        .then(periods => {
+            const globalSelect = document.getElementById('globalPeriodSelect');
+            const gridSelect = document.getElementById('gridFilterFY');
+
+            let optionsHtml = '<option value="All">All Fiscal Years</option>';
+            if (periods && periods.length > 0) {
+                optionsHtml += periods.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+            }
+
+            if (globalSelect) {
+                globalSelect.innerHTML = optionsHtml;
+                globalSelect.value = activeFinancialYear;
+            }
+            if (gridSelect) {
+                gridSelect.innerHTML = optionsHtml;
+                gridSelect.value = activeFinancialYear;
+            }
+        })
+        .catch(err => console.error('Failed to load periods:', err));
+}
+
+function applyGlobalPeriod() {
+    const sel = document.getElementById('globalPeriodSelect');
+    activeFinancialYear = sel ? sel.value : 'All';
+
+    // Sync grid filter FY
+    const gridSel = document.getElementById('gridFilterFY');
+    if (gridSel) gridSel.value = activeFinancialYear;
+
+    refreshDashboardViews();
     loadVouchersGrid(1);
 }
 
@@ -29,7 +71,6 @@ function setViewMode(mode) {
     if (mode === 'dashboard') document.getElementById('btnViewDash').classList.add('active');
     if (mode === 'chat') document.getElementById('btnViewChat').classList.add('active');
 
-    // Force Chart.js redraw after container dimension shift
     setTimeout(() => {
         if (trendChartInstance) trendChartInstance.resize();
         if (debtorsChartInstance) debtorsChartInstance.resize();
@@ -38,10 +79,16 @@ function setViewMode(mode) {
 }
 
 // ==================== EXECUTIVE DASHBOARD DATA ====================
-function loadDashboardSummary() {
-    fetch('/api/dashboard/summary')
+function loadDashboardSummary(fy = 'All') {
+    const url = `/api/dashboard/summary?fy=${encodeURIComponent(fy)}`;
+    fetch(url)
         .then(res => res.json())
         .then(data => {
+            // Active Company Banner
+            const coElem = document.getElementById('headerActiveCompany');
+            if (coElem) coElem.innerText = data.active_company || 'Active Company';
+
+            // Top Financial Cards
             document.getElementById('kpiDashSales').innerText = data.sales_gross_formatted || '₹ 0.00';
             document.getElementById('kpiDashSalesNet').innerText = `Net: ₹ ${(data.sales_net / 10000000).toFixed(2)} Cr`;
 
@@ -59,12 +106,54 @@ function loadDashboardSummary() {
 
             document.getElementById('kpiDashVouchers').innerText = (data.total_vouchers || 0).toLocaleString();
             document.getElementById('kpiDashParties').innerText = `${data.unique_parties.toLocaleString()} Parties | ${data.unique_cost_centres} CCs`;
+
+            // TALLY LIQUIDITY & BALANCE SHEET COCKPIT TILES
+            // Tile 1: Cash & Bank
+            const cashElem = document.getElementById('tallyCashInHand');
+            if (cashElem) cashElem.innerText = `${data.cash_in_hand_formatted} Dr`;
+
+            const bankElem = document.getElementById('tallyBankBalance');
+            if (bankElem) bankElem.innerText = `${data.bank_balance_formatted} Dr`;
+
+            const bankLabel = document.getElementById('tallyBankLabel');
+            if (bankLabel && data.bank_name) bankLabel.innerText = `${data.bank_name}:`;
+
+            const liquidElem = document.getElementById('tallyTotalLiquid');
+            if (liquidElem) liquidElem.innerText = `${data.total_liquid_funds_formatted} Dr`;
+
+            // Tile 2: Cash Flow Velocity
+            const inElem = document.getElementById('tallyCashInflow');
+            if (inElem) inElem.innerText = `${data.cash_inflow_formatted} Dr`;
+
+            const outElem = document.getElementById('tallyCashOutflow');
+            if (outElem) outElem.innerText = `${data.cash_outflow_formatted} Cr`;
+
+            const netElem = document.getElementById('tallyNetCashFlow');
+            if (netElem) {
+                netElem.innerText = `${data.net_cash_flow_formatted} ${data.net_cash_flow >= 0 ? 'Dr' : 'Cr'}`;
+                netElem.style.color = data.net_cash_flow >= 0 ? 'var(--green)' : 'var(--maroon)';
+            }
+
+            // Tile 3: Working Capital & Ratios
+            const assetsLiabElem = document.getElementById('tallyAssetsLiab');
+            if (assetsLiabElem) {
+                assetsLiabElem.innerText = `${data.current_assets_formatted} / ${data.current_liabilities_formatted}`;
+            }
+
+            const payablesElem = document.getElementById('tallyPayables');
+            if (payablesElem) payablesElem.innerText = data.payables_formatted;
+
+            const ratiosElem = document.getElementById('tallyRatios');
+            if (ratiosElem) {
+                ratiosElem.innerText = `${data.current_ratio} : 1 | ${data.receivable_turnover_days} Days`;
+            }
         })
         .catch(err => console.error('Failed to load dashboard summary:', err));
 }
 
-function loadMonthlyTrend() {
-    fetch('/api/dashboard/monthly-trend')
+function loadMonthlyTrend(fy = 'All') {
+    const url = `/api/dashboard/monthly-trend?fy=${encodeURIComponent(fy)}`;
+    fetch(url)
         .then(res => res.json())
         .then(data => {
             renderMonthlyTrendChart(data);
@@ -80,7 +169,6 @@ function renderMonthlyTrendChart(data) {
         trendChartInstance.destroy();
     }
 
-    // Convert values to Crores for clean presentation
     const salesInCr = data.sales.map(v => Number((v / 10000000).toFixed(2)));
     const purchInCr = data.purchases.map(v => Number((v / 10000000).toFixed(2)));
     const marginsInCr = data.margins.map(v => Number((v / 10000000).toFixed(2)));
@@ -91,14 +179,14 @@ function renderMonthlyTrendChart(data) {
             labels: data.labels,
             datasets: [
                 {
-                    label: 'Gross Sales (₹ Cr)',
+                    label: 'Gross Sales Billed (₹ Cr)',
                     data: salesInCr,
                     backgroundColor: 'rgba(39, 174, 96, 0.85)',
                     borderRadius: 4,
                     order: 2
                 },
                 {
-                    label: 'Direct Purchases (₹ Cr)',
+                    label: 'Vendor Outflows (₹ Cr)',
                     data: purchInCr,
                     backgroundColor: 'rgba(230, 126, 34, 0.85)',
                     borderRadius: 4,
@@ -147,8 +235,9 @@ function renderMonthlyTrendChart(data) {
     });
 }
 
-function loadRankings() {
-    fetch('/api/dashboard/rankings?top_n=10')
+function loadRankings(fy = 'All') {
+    const url = `/api/dashboard/rankings?top_n=10&fy=${encodeURIComponent(fy)}`;
+    fetch(url)
         .then(res => res.json())
         .then(data => {
             renderDebtorsChart(data.top_debtors);
@@ -237,7 +326,7 @@ function renderCreditorsChart(creditors) {
                 tooltip: {
                     callbacks: {
                         title: (items) => fullNames[items[0].dataIndex],
-                        label: (item) => `Total Outflow: ₹ ${item.parsed.x} Cr`
+                        label: (item) => `Total Vendor Outflow: ₹ ${item.parsed.x} Cr`
                     }
                 }
             },
@@ -265,7 +354,7 @@ function renderCostCentresTable(ccs) {
     if (!tbody) return;
 
     if (!ccs || ccs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:15px;">No cost centre data available.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:15px; color:#777;">No cost centre / project allocations found for selected period.</td></tr>';
         return;
     }
 
@@ -310,7 +399,7 @@ function loadVouchersGrid(page = 1) {
 function renderVouchersGrid(items, totalRows) {
     const tbody = document.getElementById('vouchersGridBody');
     if (!items || items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 20px;">No matching vouchers found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 20px; color:#777;">No matching vouchers found for current filter.</td></tr>';
         return;
     }
 
@@ -353,7 +442,6 @@ function exportVouchersGrid() {
     const fy = document.getElementById('gridFilterFY').value;
     const search = document.getElementById('gridSearchInput').value.trim();
 
-    // Fetch full matching set up to 5,000 records for immediate CSV export
     const url = `/api/dashboard/vouchers-grid?page=1&page_size=5000&type=${encodeURIComponent(vtype)}&fy=${encodeURIComponent(fy)}&search=${encodeURIComponent(search)}`;
     
     fetch(url)
@@ -388,7 +476,6 @@ function exportVouchersGrid() {
 
 // ==================== BIDIRECTIONAL COPILOT BINDING ====================
 function askCopilotAboutParty(partyName) {
-    // If in dashboard view, switch to split so user sees copilot answer
     if (document.body.classList.contains('view-dashboard')) {
         setViewMode('split');
     }
@@ -420,7 +507,6 @@ function handleChatSubmit(e) {
     input.disabled = true;
     document.getElementById('sendBtn').innerText = 'Thinking...';
 
-    // Call API
     fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -576,7 +662,6 @@ function openSyncModal() {
                     select.disabled = false;
                     select.innerHTML = data.companies.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
                     
-                    // Auto-select Latehar if available
                     const latehar = data.companies.find(c => c.toUpperCase().includes('LATEHAR'));
                     if (latehar) {
                         select.value = latehar;
@@ -642,9 +727,8 @@ function executeTallySync() {
         // Refresh entire dashboard with new company data!
         initDashboard();
 
-        // Add notice to chat stream
         appendAssistantMessage({
-            answer: `🎉 **Tally Sync Complete!** Successfully synced **${data.vouchers_synced.toLocaleString()} vouchers** from active company: **${escapeHtml(data.company_name)}**.\n- Total Active Vouchers: **${(data.kpis.total_vouchers || 0).toLocaleString()}**\n- Gross Sales: **${data.kpis.sales_formatted}**\n- Gross Purchases: **${data.kpis.purchase_formatted}**\n\nAll dashboard charts and reports have been updated for ${escapeHtml(data.company_name)}!`,
+            answer: `🎉 **Tally Sync Complete!** Successfully synced **${data.vouchers_synced.toLocaleString()} vouchers** from company: **${escapeHtml(data.company_name)}**.\n- Total Vouchers in DB: **${(data.kpis.total_vouchers || 0).toLocaleString()}**\n- Gross Sales: **${data.kpis.sales_formatted}**\n- Gross Purchases: **${data.kpis.purchase_formatted}**\n\nAll dashboard cards, liquidity tiles, and tables have been updated for ${escapeHtml(data.company_name)}!`,
             data: [],
             sql: ''
         });
@@ -665,7 +749,7 @@ function executeTallySync() {
     });
 }
 
-// ==================== FORENSIC AUDIT SCANNER ====================
+// ==================== FORENSIC AUDIT SCANNER (ALL 5 TABLES) ====================
 function openForensicModal() {
     document.getElementById('forensicModal').style.display = 'flex';
 }
@@ -692,6 +776,7 @@ function renderForensicResults(data) {
     const body = document.getElementById('forensicModalBody');
     const s = data.summary;
 
+    // 1. BENFORD'S LAW TABLE
     let benfordHtml = '';
     if (data.benford_analysis && data.benford_analysis.digits) {
         let bRows = data.benford_analysis.digits.map(d => `
@@ -706,37 +791,126 @@ function renderForensicResults(data) {
 
         benfordHtml = `
             <div style="margin-top: 20px;">
-                <h4>1. Benford's Law First-Digit Conformity Analysis</h4>
+                <h4 style="color:#1B365D;">1. Benford's Law First-Digit Conformity Analysis</h4>
                 <p style="font-size:12px; color:#555;">Overall Status: <strong>${data.benford_analysis.overall_conformity}</strong> (Max deviation: ${data.benford_analysis.max_deviation_pct}%)</p>
-                <table class="data-table" style="margin-top:8px;">
-                    <thead>
-                        <tr><th>Digit</th><th class="num-cell">Observed %</th><th class="num-cell">Expected %</th><th class="num-cell">Deviation</th><th>Status</th></tr>
-                    </thead>
-                    <tbody>${bRows}</tbody>
-                </table>
+                <div class="table-container" style="max-height:220px; margin-top:8px;">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Digit</th><th class="num-cell">Observed %</th><th class="num-cell">Expected %</th><th class="num-cell">Deviation</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>${bRows}</tbody>
+                    </table>
+                </div>
             </div>
         `;
     }
 
+    // 2. SUSPICIOUS NARRATIONS TABLE
     let suspiciousHtml = '';
     if (data.suspicious_narrations && data.suspicious_narrations.records) {
-        let rows = data.suspicious_narrations.records.slice(0, 15).map(r => `
+        let rows = data.suspicious_narrations.records.slice(0, 50).map(r => `
             <tr>
                 <td>${r.date}</td>
                 <td>${r.voucher_type}</td>
                 <td><strong>${escapeHtml(r.party_name)}</strong></td>
-                <td class="num-cell">₹ ${r.gross_amount.toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+                <td class="num-cell">₹ ${Number(r.gross_amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
                 <td style="color:#800000; font-size:11px;">${escapeHtml(r.narration)}</td>
             </tr>
         `).join('');
 
         suspiciousHtml = `
             <div style="margin-top: 24px;">
-                <h4>2. Flagged Suspicious Narrations (${data.suspicious_narrations.total_flagged} Found)</h4>
-                <table class="data-table" style="margin-top:8px;">
-                    <thead><tr><th>Date</th><th>Type</th><th>Party</th><th class="num-cell">Amount</th><th>Narration</th></tr></thead>
-                    <tbody>${rows}</tbody>
-                </table>
+                <h4 style="color:#922B21;">2. Flagged Suspicious Narrations (${data.suspicious_narrations.total_flagged} Detected)</h4>
+                <div class="table-container" style="max-height:220px; margin-top:8px;">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Type</th><th>Party</th><th class="num-cell">Amount</th><th>Narration</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    // 3. ROUND-SUM PAYMENTS (>=1L) TABLE
+    let roundSumHtml = '';
+    if (data.round_sum_transactions && data.round_sum_transactions.records) {
+        let rows = data.round_sum_transactions.records.slice(0, 50).map(r => `
+            <tr>
+                <td>${r.date}</td>
+                <td>${r.voucher_type}</td>
+                <td><strong>${escapeHtml(r.party_name)}</strong></td>
+                <td><small>${escapeHtml(r.primary_ledger || '-')}</small></td>
+                <td class="num-cell" style="color:var(--orange);">₹ ${Number(r.gross_amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+                <td style="font-size:11px; color:#555;">${escapeHtml(r.narration || '-')}</td>
+            </tr>
+        `).join('');
+
+        roundSumHtml = `
+            <div style="margin-top: 24px;">
+                <h4 style="color:#B7950B;">3. High-Value Round-Sum Transactions (≥₹50K / ₹1L) (${data.round_sum_transactions.total_flagged} Found)</h4>
+                <p style="font-size:12px; color:#555;">Transactions matching round multiples without fractional currency amounts.</p>
+                <div class="table-container" style="max-height:220px; margin-top:8px;">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Type</th><th>Party</th><th>Primary Ledger</th><th class="num-cell">Amount</th><th>Narration</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    // 4. WEEKEND-DATED VOUCHERS TABLE
+    let weekendHtml = '';
+    if (data.weekend_entries && data.weekend_entries.records) {
+        let rows = data.weekend_entries.records.slice(0, 50).map(r => `
+            <tr>
+                <td>${r.date}</td>
+                <td><span class="badge-pro" style="background:#EBF5FB; color:#1B4F72;">${r.day_of_week}</span></td>
+                <td>${r.voucher_type}</td>
+                <td><strong>${escapeHtml(r.party_name)}</strong></td>
+                <td class="num-cell">₹ ${Number(r.gross_amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+                <td style="font-size:11px; color:#555;">${escapeHtml(r.narration || '-')}</td>
+            </tr>
+        `).join('');
+
+        weekendHtml = `
+            <div style="margin-top: 24px;">
+                <h4 style="color:#2874A6;">4. Weekend-Dated Vouchers (${data.weekend_entries.total_flagged} Found)</h4>
+                <p style="font-size:12px; color:#555;">Entries booked on Saturdays or Sundays warranting segregation-of-duties review.</p>
+                <div class="table-container" style="max-height:220px; margin-top:8px;">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Day</th><th>Type</th><th>Party</th><th class="num-cell">Amount</th><th>Narration</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    // 5. DUPLICATE BILL GROUPS TABLE
+    let duplicateHtml = '';
+    if (data.duplicate_bills && data.duplicate_bills.records) {
+        let rows = data.duplicate_bills.records.slice(0, 50).map(r => `
+            <tr>
+                <td><strong>${escapeHtml(r.party_name)}</strong></td>
+                <td><code style="background:#F2F4F4; padding:2px 6px; border-radius:3px;">${escapeHtml(r.reference_no)}</code></td>
+                <td style="text-align:center; font-weight:700; color:red;">${r.duplicate_count}</td>
+                <td><small>${escapeHtml(r.dates || '-')}</small></td>
+                <td><small>${escapeHtml(r.voucher_numbers || '-')}</small></td>
+                <td class="num-cell" style="font-weight:700;">₹ ${Number(r.total_amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+            </tr>
+        `).join('');
+
+        duplicateHtml = `
+            <div style="margin-top: 24px;">
+                <h4 style="color:#1E8449;">5. Potential Duplicate Billing References (${data.duplicate_bills.total_flagged} Groups)</h4>
+                <p style="font-size:12px; color:#555;">Multiple entries sharing identical Party Name and Bill Reference Number.</p>
+                <div class="table-container" style="max-height:220px; margin-top:8px;">
+                    <table class="data-table">
+                        <thead><tr><th>Party Name</th><th>Bill / Reference #</th><th style="text-align:center;">Count</th><th>Voucher Dates</th><th>Voucher Numbers</th><th class="num-cell">Total Amount</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
             </div>
         `;
     }
@@ -762,6 +936,9 @@ function renderForensicResults(data) {
         </div>
         ${benfordHtml}
         ${suspiciousHtml}
+        ${roundSumHtml}
+        ${weekendHtml}
+        ${duplicateHtml}
     `;
 }
 
