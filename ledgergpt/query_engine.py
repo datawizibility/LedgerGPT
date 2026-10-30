@@ -11,13 +11,27 @@ from ledgergpt.llm_adapter import LLMAdapter
 from ledgergpt.dashboard_service import DashboardService
 
 def extract_fy(text):
-    m = re.search(r"(?:fy\s*)?(\d{4})[-_](\d{2,4})", text, re.IGNORECASE)
-    if m:
-        yr1 = m.group(1)
-        yr2 = m.group(2)
-        if len(yr2) == 4:
-            yr2 = yr2[2:]
+    # Case 1: Explicit 'FY' prefix, e.g. "FY 2017-18", "fy-2018", "fy2019"
+    m_exp = re.search(r"\bfy\s*[-_]?\s*(\d{4})(?:[-_](\d{2,4}))?\b", text, re.IGNORECASE)
+    if m_exp:
+        yr1 = m_exp.group(1)
+        yr2 = m_exp.group(2)
+        if yr2:
+            if len(yr2) == 4:
+                yr2 = yr2[2:]
+        else:
+            yr2 = str(int(yr1) + 1)[2:]
         return f"FY {yr1}-{yr2}"
+
+    # Case 2: Consecutive financial years without "FY", e.g. "2017-18" or "2017-2018"
+    # Rejects bare date ranges like "2017-04" or "2017-06"
+    m_pair = re.search(r"\b(\d{4})[-_](\d{2,4})\b", text)
+    if m_pair:
+        yr1 = int(m_pair.group(1))
+        raw_yr2 = m_pair.group(2)
+        yr2 = int(raw_yr2) if len(raw_yr2) == 4 else (yr1 // 100 * 100 + int(raw_yr2))
+        if yr2 == yr1 + 1:
+            return f"FY {yr1}-{str(yr2)[2:]}"
     return None
 
 def extract_top_n(text, default=10):
@@ -35,6 +49,8 @@ def extract_top_n(text, default=10):
     return default
 
 class QueryEngine:
+    extract_fy = staticmethod(extract_fy)
+
     def __init__(self, db=None, llm_adapter=None):
         self.db = db or FinancialDB()
         self.llm = llm_adapter or LLMAdapter()
@@ -637,7 +653,8 @@ class QueryEngine:
             return None
 
         ent_lower = entity_name.lower()
-        is_cash_bank = any(k in ent_lower for k in ["cash", "bank", "axis", "hdfc", "icici", "sbi", "kotak", "pnb", "bob"])
+        # Word-boundary matching to prevent false positives like 'Bobson Traders', 'Akashic', etc.
+        is_cash_bank = bool(re.search(r"\b(cash|bank|axis|hdfc|icici|sbi|kotak|pnb|bob)\b", ent_lower))
         
         # Check predominant nature among rows
         sales_cnt = sum(1 for r in rows if (r["voucher_type"] or "").lower() == "sales")

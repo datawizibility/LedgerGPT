@@ -3,7 +3,7 @@ LedgerGPT — Enterprise Conversational AI & Deterministic Query Engine for ERP 
 Zero-Hallucination | Audit-First | Institutional Financial Intelligence.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.4.0"
 __author__ = "Amit Rathi (Datawizibility)"
 __license__ = "MIT"
 

@@ -17,7 +17,7 @@ def read_only_authorizer(action, arg1, arg2, db_name, trigger_name):
     SQLite authorizer callback that strictly forbids all write, DDL,
     and schema-modifying actions during read-only SQL queries.
     Blocks CTE injection attacks (e.g., WITH t AS (...) DELETE FROM ...).
-    Permits internal virtual table schema reflection on sqlite_master.
+    Permits internal virtual table schema reflection on sqlite_master and internal PRAGMA data_version.
     """
     if action in (
         sqlite3.SQLITE_DELETE,
@@ -31,6 +31,10 @@ def read_only_authorizer(action, arg1, arg2, db_name, trigger_name):
         sqlite3.SQLITE_DETACH,
     ):
         return sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_PRAGMA:
+        # Strictly deny write pragmas (arg2 is not None) and all user pragmas except internal virtual table reflection
+        if arg2 is not None or arg1 not in ("data_version",):
+            return sqlite3.SQLITE_DENY
     if action == sqlite3.SQLITE_UPDATE:
         if arg1 not in ("sqlite_master", "sqlite_schema"):
             return sqlite3.SQLITE_DENY
@@ -169,6 +173,12 @@ class FinancialDB:
         )
         """)
 
+        # One-time cleanup of legacy fabricated tally_metrics in existing databases
+        cursor.execute("""
+        DELETE FROM company_metadata 
+        WHERE key = 'tally_metrics' AND value LIKE '%89468%'
+        """)
+
         conn.commit()
         if not self._shared_conn:
             conn.close()
@@ -249,13 +259,13 @@ class FinancialDB:
         """
         stripped = sql.strip()
         first_token = re.split(r'\s+', stripped)[0].upper()
-        forbidden_keywords = ["DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE", "REPLACE", "CREATE"]
+        forbidden_keywords = ["DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE", "REPLACE", "CREATE", "PRAGMA"]
         if first_token in forbidden_keywords:
-            raise ValueError(f"Write operation '{first_token}' is forbidden in financial query engine.")
+            raise ValueError(f"Write or schema operation '{first_token}' is forbidden in financial query engine.")
 
-        # Additional regex check for write verbs across statement
-        if re.search(r'\b(DELETE\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DROP\s+TABLE|ALTER\s+TABLE)\b', stripped, re.IGNORECASE):
-            raise ValueError("Write operation detected in financial query engine.")
+        # Additional regex check for write and pragma verbs across statement
+        if re.search(r'\b(DELETE\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DROP\s+TABLE|ALTER\s+TABLE|PRAGMA)\b', stripped, re.IGNORECASE):
+            raise ValueError("Forbidden write or PRAGMA operation detected in financial query engine.")
 
         conn = self.get_connection()
         conn.set_authorizer(read_only_authorizer)
@@ -331,6 +341,16 @@ class FinancialDB:
         conn.commit()
         if not self._shared_conn:
             conn.close()
+
+    def clear_vouchers(self):
+        """Clears vouchers table and rebuilds FTS."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM vouchers")
+        conn.commit()
+        if not self._shared_conn:
+            conn.close()
+        self.rebuild_fts()
 
     def set_metadata(self, key, value):
         """Sets a key-value pair in company_metadata table."""

@@ -126,8 +126,10 @@ class DashboardService:
                 t_metrics = {}
 
             # Tally Balance Sheet & Cash Balances (strictly authentic, zero hardcoded fabrication)
+            # Guard against stale legacy metadata that stored the obsolete mock 89468.0 figure
+            raw_cash = float(t_metrics.get("cash_in_hand", 0.0) or 0.0)
+            cash_bal = 0.0 if raw_cash == 89468.0 else raw_cash
             bank_bal = float(t_metrics.get("bank_balance", 0.0) or 0.0)
-            cash_bal = float(t_metrics.get("cash_in_hand", 0.0) or 0.0)
             total_liquid = bank_bal + cash_bal
             current_assets = float(t_metrics.get("current_assets", 0.0) or 0.0)
             current_liabilities = float(t_metrics.get("current_liabilities", 0.0) or 0.0)

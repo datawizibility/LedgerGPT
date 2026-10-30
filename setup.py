@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="ledgergpt",
-    version="1.0.0",
+    version="1.4.0",
     description="Enterprise Conversational AI & Deterministic Query Engine for ERP & Tally Prime",
     author="Amit Rathi (Datawizibility)",
     author_email="datawizibility@gmail.com",

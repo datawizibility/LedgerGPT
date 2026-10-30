@@ -31,10 +31,12 @@ with db.get_connection() as conn:
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM vouchers")
     count = cursor.fetchone()[0]
-    if count == 0 and os.path.exists(SAMPLE_DATA_DIR):
-        print("[AUTO-INIT] Empty database detected. Ingesting verified sample dataset...")
+    force_seed = os.getenv("LEDGERGPT_FORCE_SAMPLE", "0") in ("1", "true", "True")
+    if (count == 0 or force_seed) and os.path.exists(SAMPLE_DATA_DIR):
+        print("[AUTO-INIT] Ingesting verified sample dataset...")
         ingestor = DataIngestor(db=db)
         ingestor.ingest_sample_dataset(SAMPLE_DATA_DIR)
+        db.set_metadata("sample_ingested", "1")
 
 @app.route("/")
 def index():
@@ -186,9 +188,11 @@ def sync_tally():
         return jsonify(result), 400
 
 @app.route("/api/ingest_sample", methods=["POST"])
+@app.route("/api/seed-sample", methods=["POST"])
 def ingest_sample():
     ingestor = DataIngestor(db=db)
     cnt = ingestor.ingest_sample_dataset(SAMPLE_DATA_DIR)
+    db.set_metadata("sample_ingested", "1")
     return jsonify({"status": "success", "vouchers_ingested": cnt})
 
 def run():

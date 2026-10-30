@@ -166,6 +166,66 @@ class TestQCRemediation(unittest.TestCase):
         self.assertNotIn("Akash Enterprises", flagged_parties)
         self.assertIn("Cash", flagged_parties)
 
+    def test_08_extract_fy_date_intervals_vs_financial_years(self):
+        """Verify L2: extract_fy rejects date fragments (2017-04) and correctly parses true FYs."""
+        # Bare date fragment must NOT be treated as FY 2017-04
+        self.assertIsNone(self.engine.extract_fy("sales between 2017-04 and 2017-06"))
+        self.assertIsNone(self.engine.extract_fy("invoices from 2023-01 to 2023-03"))
+        
+        # Valid FY patterns must match
+        self.assertEqual(self.engine.extract_fy("sales in 2017-18"), "FY 2017-18")
+        self.assertEqual(self.engine.extract_fy("total turnover fy 2024-25"), "FY 2024-25")
+        self.assertEqual(self.engine.extract_fy("revenue for fy 2023-2024"), "FY 2023-24")
+
+    def test_09_cash_bank_party_word_boundaries(self):
+        """Verify L1: parties like 'Bobson Traders' or 'Akashic Ltd' are not misclassified as Cash/Bank."""
+        # Ledger statement for Bobson Traders should NOT treat it as Cash/Bank
+        vouchers = [
+            {"guid": "B1", "voucher_type": "Sales", "voucher_no": "INV-10", "date": "2024-05-01",
+             "financial_year": "FY 2024-25", "party_name": "Bobson Traders", "primary_ledger": "Sales A/c",
+             "gross_amount": 50000.0, "net_amount": 50000.0}
+        ]
+        self.db.insert_vouchers_batch(vouchers)
+        res = self.engine._generate_ledger_statement("Bobson Traders")
+        self.assertIsNotNone(res)
+        data = res["data"]
+        # For a Debtor (Bobson Traders), a Sales voucher should be a Debit
+        self.assertIn("50,000.00", data[0]["debit"])
+        self.assertEqual(data[0]["credit"], "-")
+
+    def test_10_readonly_sql_blocks_pragma(self):
+        """Verify L3: PRAGMA commands are blocked by execute_query and SQLite authorizer."""
+        with self.assertRaises((ValueError, sqlite3.DatabaseError)):
+            self.db.execute_query("PRAGMA journal_mode")
+
+        with self.assertRaises((ValueError, sqlite3.DatabaseError)):
+            self.db.execute_query("PRAGMA foreign_keys=OFF")
+
+    def test_11_stale_metadata_cleared_on_init_schema(self):
+        """Verify M2: legacy fabricated 89468 tally_metrics rows are purged on init_schema."""
+        self.db.set_metadata("tally_metrics", '{"cash_in_hand": 89468.0, "bank_name": "AXIS BANK"}')
+        self.assertIsNotNone(self.db.get_metadata("tally_metrics"))
+
+        # Re-run init_schema()
+        self.db.init_schema()
+        self.assertIsNone(self.db.get_metadata("tally_metrics"))
+
+        summary = self.dashboard.get_executive_summary()
+        self.assertEqual(summary["cash_in_hand"], 0.0)
+
+    def test_12_sync_payload_reports_rejected_records(self):
+        """Verify M1: sync engine payload includes rejected_count and rejected_records."""
+        from ledgergpt.tally_sync import TallySyncEngine
+        sync_engine = TallySyncEngine(db=self.db)
+        sync_engine.rejected_records.append({
+            "guid": "BAD-1",
+            "voucher_no": "999",
+            "voucher_type": "Payment",
+            "raw_date": "invalid-date",
+            "reason": "Unparseable date format"
+        })
+        self.assertEqual(len(sync_engine.rejected_records), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

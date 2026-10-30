@@ -8,6 +8,7 @@ Packaged as module for setuptools console_scripts support.
 import sys
 import io
 import argparse
+from ledgergpt import __version__
 from ledgergpt.db import FinancialDB
 from ledgergpt.query_engine import QueryEngine
 from ledgergpt.forensic import ForensicScanner
@@ -22,7 +23,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 def print_banner():
     print("=" * 80)
     print("  LEDGERGPT — Zero-Hallucination Conversational Finance Engine")
-    print("  Deterministic ERP & Tally Prime Intelligence | Version 1.0.0")
+    print(f"  Deterministic ERP & Tally Prime Intelligence | Version {__version__}")
     print("=" * 80)
 
 def interactive_chat():
@@ -79,10 +80,10 @@ def main():
     parser.add_argument("--kpis", action="store_true", help="Display top-level financial KPIs")
     parser.add_argument("--forensic", action="store_true", help="Run full forensic audit scanner")
     parser.add_argument("--ingest", type=str, help="Ingest a CSV register into the database")
-    parser.add_argument("--init-sample", action="store_true", help="Ingest preloaded sample data")
+    parser.add_argument("--init-sample", "--seed-sample", dest="init_sample", action="store_true", help="Ingest preloaded sample data")
     parser.add_argument("--sync-tally", action="store_true", help="Sync vouchers live from active Tally Prime company")
     parser.add_argument("--company", type=str, help="Specify company name for Tally sync")
-    parser.add_argument("--clear", action="store_true", help="Clear existing vouchers before sync")
+    parser.add_argument("--clear", action="store_true", help="Clear existing vouchers before sync or sample init")
 
     args = parser.parse_args()
 
@@ -118,6 +119,9 @@ def main():
         return
 
     if args.init_sample:
+        if args.clear:
+            db.clear_vouchers()
+            print("[INFO] Cleared existing vouchers.")
         ingestor = DataIngestor(db=db)
         cnt = ingestor.ingest_sample_dataset(SAMPLE_DATA_DIR)
         print(f"[SUCCESS] Ingested sample dataset: {cnt:,} total vouchers.")

@@ -431,11 +431,15 @@ class TallySyncEngine:
         self.db.set_metadata("tally_metrics", json.dumps(metrics))
 
         kpis = self.db.get_kpis()
+        rej_count = len(self.rejected_records)
+        rej_msg = f" ({rej_count} rejected due to invalid dates)" if rej_count > 0 else ""
 
         return {
             "success": True,
             "company_name": target_company,
             "vouchers_synced": count,
+            "rejected_count": rej_count,
+            "rejected_records": self.rejected_records[:50],
             "kpis": kpis,
-            "message": f"Successfully synced {count:,} vouchers from '{target_company}'."
+            "message": f"Successfully synced {count:,} vouchers from '{target_company}'{rej_msg}."
         }
