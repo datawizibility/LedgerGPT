@@ -188,5 +188,22 @@ python cli.py --forensic
 
 ---
 
+## 🗺️ Roadmap
+
+| Phase | Feature | Status |
+|---|---|---|
+| ✅ Shipped | Deterministic-first query engine (SQLite FTS5) | Live |
+| ✅ Shipped | Bill-by-bill aging cockpit (debtors/creditors) | Live |
+| ✅ Shipped | Forensic audit & statutory scanner | Live |
+| ✅ Shipped | 1-Click CFO MIS board pack | Live |
+| 🔨 In progress | Multi-company, multi-year comparative analytics | Q4 2026 |
+| 🔨 In progress | REST API hardening + API-key auth for firm deployments | Q4 2026 |
+| 📋 Planned | Tally Prime XML sync connector (trial balance, ledgers) | Q1 2027 |
+| 📋 Planned | GST reconciliation module (GSTR-2B vs books) | Q1 2027 |
+| 📋 Planned | Multi-user mode for CA firms (role-based access) | Q1 2027 |
+| 📋 Planned | Scheduled audit runs with email digests | Q2 2027 |
+
+Contributions and feature requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## 📄 License
 Released under the [MIT License](LICENSE). Copyright (c) 2026 Datawizibility (Amit Rathi).
